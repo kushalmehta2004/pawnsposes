@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="min-h-screen bg-gray-100">
+        <h1 class="text-2xl font-bold p-4">Admin Dashboard Test</h1>
+        
+        <div class="p-4">
+            <button onclick="testShowSection('dashboard')" class="bg-blue-500 text-white px-4 py-2 rounded mr-2">
+                Test Dashboard
+            </button>
+            <button onclick="testShowSection('contacts')" class="bg-green-500 text-white px-4 py-2 rounded mr-2">
+                Test Contacts
+            </button>
+            <button onclick="testShowSection('students')" class="bg-purple-500 text-white px-4 py-2 rounded mr-2">
+                Test Students
+            </button>
+        </div>
+        
+        <div id="testResults" class="p-4 bg-white m-4 rounded shadow">
+            <h2 class="text-lg font-semibold mb-2">Test Results:</h2>
+            <div id="results"></div>
+        </div>
+        
+        <!-- Test content sections -->
+        <div id="dashboardContent" class="p-4 bg-blue-100 m-4 rounded">
+            <h2>Dashboard Content</h2>
+            <p>This is the dashboard section.</p>
+        </div>
+        
+        <div id="contactsContent" class="hidden p-4 bg-green-100 m-4 rounded">
+            <h2>Contacts Content</h2>
+            <p>This is the contacts section.</p>
+        </div>
+        
+        <div id="studentsContent" class="hidden p-4 bg-purple-100 m-4 rounded">
+            <h2>Students Content</h2>
+            <p>This is the students section.</p>
+        </div>
+    </div>
+
+    <script>
+        // Simple test function
+        function testShowSection(section) {
+            console.log('Testing section:', section);
+            
+            // Hide all sections
+            document.querySelectorAll('[id$="Content"]').forEach(content => {
+                content.classList.add('hidden');
+            });
+            
+            // Show target section
+            const targetContent = document.getElementById(section + 'Content');
+            if (targetContent) {
+                targetContent.classList.remove('hidden');
+                addResult(`✅ Successfully switched to ${section} section`);
+            } else {
+                addResult(`❌ Failed to find ${section}Content element`);
+            }
+        }
+        
+        function addResult(message) {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = 'mb-1';
+            div.textContent = message;
+            results.appendChild(div);
+        }
+        
+        // Test on load
+        document.addEventListener('DOMContentLoaded', function() {
+            addResult('✅ Test page loaded successfully');
+            addResult('✅ JavaScript is working');
+        });
+    </script>
+</body>
+</html>
