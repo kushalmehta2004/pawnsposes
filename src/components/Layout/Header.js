@@ -51,9 +51,11 @@ const Header = () => {
         <nav className="flex items-center justify-between py-4">
           {/* Logo */}
           <Link to="/" className="flex items-center space-x-2" onClick={closeMenu}>
-            <div className="w-10 h-10 bg-gradient-to-r from-primary-600 to-primary-700 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-xl">♟</span>
-            </div>
+            <img 
+              src="/logo.jpg" 
+              alt="PawnsPoses Logo" 
+              className="w-10 h-10 object-contain rounded-lg"
+            />
             <span className="text-2xl font-bold text-gradient">PawnsPoses</span>
           </Link>
 
