@@ -14,6 +14,7 @@ import {
   Facebook,
   Twitter
 } from 'lucide-react';
+import emailService from '../services/emailService';
 
 const Contact = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -30,19 +31,12 @@ const Contact = () => {
     setIsSubmitting(true);
     
     try {
-      const response = await fetch('http://localhost:5000/api/contact', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to send message');
-      }
-      
       console.log('Contact form submitted:', data);
+      
+      // Send email using EmailJS
+      await emailService.sendContactEmail(data);
+      
+      console.log('Contact email sent successfully');
       
       toast.success('Message sent successfully! We will get back to you soon.');
       setIsSubmitted(true);

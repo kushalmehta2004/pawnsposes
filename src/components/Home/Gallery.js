@@ -1,15 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ChevronLeft, ChevronRight, Trophy, Users, Star } from 'lucide-react';
-import apiService from '../../services/api';
 
 const Gallery = () => {
   const [selectedImage, setSelectedImage] = useState(null);
-  const [galleryImages, setGalleryImages] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [loading] = useState(false);
 
-  const fallbackImages = [
+  const galleryImages = [
     {
       _id: 1,
       image: { url: "/api/placeholder/400/300" },
@@ -32,28 +29,6 @@ const Gallery = () => {
       category: "training"
     }
   ];
-
-  useEffect(() => {
-    loadGallery();
-  }, []);
-
-  const loadGallery = async () => {
-    try {
-      setLoading(true);
-      const response = await apiService.getFeaturedGalleryImages();
-      if (response.images && response.images.length > 0) {
-        setGalleryImages(response.images);
-      } else {
-        setGalleryImages(fallbackImages);
-      }
-    } catch (error) {
-      console.error('Error loading gallery:', error);
-      setError('Failed to load gallery');
-      setGalleryImages(fallbackImages);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const stats = [
     {

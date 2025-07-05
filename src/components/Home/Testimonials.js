@@ -1,14 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Star, Quote } from 'lucide-react';
-import apiService from '../../services/api';
 
 const Testimonials = () => {
-  const [testimonials, setTestimonials] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [loading] = useState(false);
 
-  const fallbackTestimonials = [
+  const testimonials = [
     {
       _id: 1,
       name: "Rajesh Kumar",
@@ -37,28 +34,6 @@ const Testimonials = () => {
       achievement: "School Chess Champion"
     }
   ];
-
-  useEffect(() => {
-    loadTestimonials();
-  }, []);
-
-  const loadTestimonials = async () => {
-    try {
-      setLoading(true);
-      const response = await apiService.getFeaturedTestimonials();
-      if (response.testimonials && response.testimonials.length > 0) {
-        setTestimonials(response.testimonials);
-      } else {
-        setTestimonials(fallbackTestimonials);
-      }
-    } catch (error) {
-      console.error('Error loading testimonials:', error);
-      setError('Failed to load testimonials');
-      setTestimonials(fallbackTestimonials);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const containerVariants = {
     hidden: { opacity: 0 },

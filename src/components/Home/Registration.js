@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { useForm } from 'react-hook-form';
 import { toast } from 'react-hot-toast';
 import { User, Mail, Phone, Calendar, Users, MessageCircle, Send, CheckCircle } from 'lucide-react';
+import emailService from '../../services/emailService';
 
 const Registration = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -50,65 +51,23 @@ const Registration = () => {
         return;
       }
       
-      const studentData = {
-        name: data.studentName.trim(),
+      // Prepare form data for email
+      const formData = {
+        studentName: data.studentName.trim(),
         email: data.email.trim(),
         phone: data.phone.trim(),
         parentName: data.parentName ? data.parentName.trim() : '',
-        experience: 'beginner', // Default value
-        courseType: data.classType || 'individual',
-        goals: data.experience ? data.experience.trim() : null, // This is the chess experience text field
-        source: 'website'
+        ageGroup: data.ageGroup,
+        classType: data.classType || 'individual',
+        experience: data.experience ? data.experience.trim() : ''
       };
 
-      // Map age group to approximate age if provided
-      if (data.ageGroup) {
-        const ageMapping = {
-          '5-8': 6,
-          '9-12': 10,
-          '13-16': 14,
-          '17+': 20
-        };
-        studentData.age = ageMapping[data.ageGroup] || null;
-      }
+      console.log('Final formData being sent via email:', formData);
 
-      console.log('Final studentData being sent:', studentData);
-      console.log('JSON.stringify(studentData):', JSON.stringify(studentData));
-
-      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-      console.log('API URL:', apiUrl);
+      // Send email using EmailJS
+      await emailService.sendRegistrationEmail(formData);
       
-      const response = await fetch(`${apiUrl}/api/students`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(studentData),
-      });
-
-      console.log('Response status:', response.status);
-      console.log('Response headers:', response.headers);
-
-      if (!response.ok) {
-        let errorData;
-        try {
-          errorData = await response.json();
-        } catch (parseError) {
-          console.error('Failed to parse error response:', parseError);
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        console.error('API Error Response:', errorData);
-        
-        // Handle validation errors
-        if (errorData.errors && Array.isArray(errorData.errors)) {
-          const errorMessages = errorData.errors.map(err => err.msg).join(', ');
-          throw new Error(errorMessages);
-        }
-        
-        throw new Error(errorData.message || 'Failed to register student');
-      }
-      
-      console.log('Student registered successfully');
+      console.log('Registration email sent successfully');
       
       // Show success message
       toast.success('Registration successful! We will contact you soon.');

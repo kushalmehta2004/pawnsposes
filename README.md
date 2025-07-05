@@ -1,12 +1,13 @@
 # PawnsPoses Chess Coaching Website
 
-A modern, responsive chess coaching website built with React. This MVP (Minimum Viable Product) includes all essential features for a chess coaching business with a focus on scalability and clean code architecture.
+A modern, responsive chess coaching website built with React. This frontend-only application sends form submissions directly to your Gmail using EmailJS - no backend required!
 
 ## 🎯 Features
 
 - **Modern Design**: Clean, professional design inspired by successful coaching platforms
 - **Responsive Layout**: Works perfectly on all devices (desktop, tablet, mobile)
 - **Interactive Components**: Smooth animations and transitions using Framer Motion
+- **Email Integration**: Forms send directly to your Gmail via EmailJS
 - **Registration System**: Complete form handling with validation
 - **Photo Gallery**: Showcase student achievements and coaching moments
 - **WhatsApp Integration**: Direct booking and contact via WhatsApp
@@ -23,6 +24,7 @@ A modern, responsive chess coaching website built with React. This MVP (Minimum 
 - **React Hook Form**: Form handling and validation
 - **React Hot Toast**: Toast notifications
 - **Lucide React**: Beautiful icons
+- **EmailJS**: Frontend email service for form submissions
 
 ## 📁 Project Structure
 
@@ -62,12 +64,17 @@ src/
    npm install
    ```
 
-3. **Start the development server**
+3. **Configure EmailJS**
+   - Follow the detailed setup guide in `EMAIL_SETUP_GUIDE.md`
+   - Update the `.env` file with your EmailJS credentials
+   - Replace placeholder email addresses with your Gmail
+
+4. **Start the development server**
    ```bash
    npm start
    ```
 
-4. **Build for production**
+5. **Build for production**
    ```bash
    npm run build
    ```
@@ -118,25 +125,27 @@ Update WhatsApp numbers in:
 - **FAQ**: Common questions answered
 - **Social Media**: Links to social profiles
 
-## 🔧 Backend Integration Ready
+## 📧 Email Integration
 
-The website is designed to be easily integrated with a backend:
+The website uses EmailJS to send form submissions directly to your Gmail:
 
 ### Form Handling
+- Registration form sends student details to your email
+- Contact form sends inquiries to your email
 - All forms use React Hook Form for validation
-- Ready to connect to APIs
-- Error handling implemented
+- Error handling and success notifications implemented
 
-### Data Structure
-- Clean component structure
-- Separated concerns
-- Easy to add state management (Redux, Context API)
+### Email Templates
+- Separate templates for registration and contact forms
+- Professional formatting with all form data
+- Automatic reply-to functionality
+- Submission timestamps included
 
-### API Integration Points
-- Registration form submission
-- Contact form submission
-- Gallery image management
-- Testimonials management
+### Setup Requirements
+- EmailJS account (free tier available)
+- Gmail account for receiving emails
+- Environment variables configuration
+- Template setup in EmailJS dashboard
 
 ## 🌟 Future Enhancements
 
