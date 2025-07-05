@@ -56,7 +56,7 @@ const Header = () => {
               alt="PawnsPoses Logo" 
               className="w-10 h-10 object-contain rounded-lg"
             />
-            <span className="text-2xl font-bold text-gradient">PawnsPoses</span>
+            <span className="text-2xl font-bold bg-gradient-to-r from-primary-600 to-secondary-600 bg-clip-text text-transparent">PawnsPoses</span>
           </Link>
 
           {/* Desktop Navigation */}
@@ -89,7 +89,7 @@ const Header = () => {
             </a>
             <button
               onClick={handleWhatsApp}
-              className="flex items-center space-x-2 btn-primary"
+              className="flex items-center space-x-2 bg-gradient-to-r from-secondary-500 to-secondary-600 hover:from-secondary-600 hover:to-secondary-700 text-white px-6 py-3 rounded-lg font-semibold transform hover:scale-105 transition-all duration-200 shadow-lg hover:shadow-xl"
             >
               <MessageCircle size={18} />
               <span>Book Demo</span>
@@ -144,7 +144,7 @@ const Header = () => {
                   </a>
                   <button
                     onClick={handleWhatsApp}
-                    className="flex items-center justify-center space-x-2 w-full btn-primary"
+                    className="flex items-center justify-center space-x-2 w-full bg-gradient-to-r from-secondary-500 to-secondary-600 hover:from-secondary-600 hover:to-secondary-700 text-white px-6 py-3 rounded-lg font-semibold transform hover:scale-105 transition-all duration-200 shadow-lg hover:shadow-xl"
                   >
                     <MessageCircle size={18} />
                     <span>Book Demo</span>

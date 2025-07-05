@@ -8,37 +8,37 @@ const Features = () => {
       icon: Brain,
       title: "Strategic Thinking",
       description: "Develop critical thinking and problem-solving skills through chess",
-      color: "from-blue-500 to-blue-600"
+      color: "from-primary-500 to-primary-600"
     },
     {
       icon: Users,
       title: "Expert Coaches",
       description: "Learn from certified chess masters with years of experience",
-      color: "from-green-500 to-green-600"
+      color: "from-secondary-500 to-secondary-600"
     },
     {
       icon: Trophy,
       title: "Tournament Ready",
       description: "Prepare for competitions and achieve tournament success",
-      color: "from-yellow-500 to-yellow-600"
+      color: "from-secondary-400 to-secondary-500"
     },
     {
       icon: Target,
       title: "Personalized Learning",
       description: "Tailored lessons based on your skill level and goals",
-      color: "from-purple-500 to-purple-600"
+      color: "from-primary-600 to-primary-700"
     },
     {
       icon: Clock,
       title: "Flexible Schedule",
       description: "Choose class timings that fit your busy schedule",
-      color: "from-pink-500 to-pink-600"
+      color: "from-secondary-600 to-secondary-700"
     },
     {
       icon: Star,
       title: "Proven Results",
       description: "Track record of students winning local and national tournaments",
-      color: "from-orange-500 to-orange-600"
+      color: "from-primary-500 to-secondary-500"
     }
   ];
 

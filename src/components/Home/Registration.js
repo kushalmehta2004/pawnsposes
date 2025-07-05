@@ -319,7 +319,7 @@ const Registration = () => {
             className="space-y-8"
           >
             {/* Quick Contact */}
-            <div className="card p-8 bg-gradient-to-r from-green-500 to-green-600 text-white">
+            <div className="card p-8 bg-gradient-to-r from-secondary-500 to-secondary-600 text-white">
               <h3 className="text-2xl font-bold mb-4 flex items-center">
                 <MessageCircle className="mr-3" size={24} />
                 Quick Registration
@@ -329,7 +329,7 @@ const Registration = () => {
               </p>
               <button
                 onClick={handleWhatsApp}
-                className="w-full bg-white text-green-600 hover:bg-gray-100 px-6 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center space-x-2"
+                className="w-full bg-white text-secondary-600 hover:bg-gray-100 px-6 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center space-x-2"
               >
                 <MessageCircle size={20} />
                 <span>WhatsApp Registration</span>

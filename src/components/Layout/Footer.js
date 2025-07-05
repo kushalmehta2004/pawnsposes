@@ -8,15 +8,15 @@ const Footer = () => {
   };
 
   return (
-    <footer className="bg-dark-800 text-white">
+    <footer className="bg-gradient-to-b from-primary-800 to-primary-900 text-white">
       <div className="container-max">
         <div className="py-12">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
             {/* Company Info */}
             <div className="space-y-4">
               <div className="flex items-center space-x-2">
-                <div className="w-10 h-10 bg-gradient-to-r from-primary-600 to-primary-700 rounded-lg flex items-center justify-center">
-                  <span className="text-white font-bold text-xl">♟</span>
+                <div className="w-10 h-10 bg-gradient-to-r from-secondary-500 to-secondary-600 rounded-lg flex items-center justify-center">
+                  <span className="text-white font-bold text-xl">♛</span>
                 </div>
                 <span className="text-2xl font-bold">PawnsPoses</span>
               </div>
@@ -105,7 +105,7 @@ const Footer = () => {
               </div>
               <button
                 onClick={handleWhatsApp}
-                className="flex items-center space-x-2 w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors"
+                className="flex items-center space-x-2 w-full bg-gradient-to-r from-secondary-500 to-secondary-600 hover:from-secondary-600 hover:to-secondary-700 text-white px-4 py-2 rounded-lg transition-all duration-200 transform hover:scale-105"
               >
                 <MessageCircle size={18} />
                 <span>WhatsApp Us</span>

@@ -20,13 +20,13 @@ const Hero = () => {
       <div className="absolute inset-0 chess-gradient">
         <div className="absolute inset-0 bg-black/20"></div>
         {/* Chess pieces pattern */}
-        <div className="absolute inset-0 opacity-10">
-          <div className="absolute top-20 left-20 text-6xl">♜</div>
-          <div className="absolute top-40 right-32 text-4xl">♞</div>
-          <div className="absolute bottom-32 left-16 text-5xl">♝</div>
-          <div className="absolute bottom-20 right-20 text-6xl">♛</div>
-          <div className="absolute top-60 left-1/2 text-3xl">♚</div>
-          <div className="absolute top-32 left-1/3 text-4xl">♟</div>
+        <div className="absolute inset-0 opacity-20">
+          <div className="absolute top-20 left-20 text-6xl text-secondary-400">♜</div>
+          <div className="absolute top-40 right-32 text-4xl text-secondary-500">♞</div>
+          <div className="absolute bottom-32 left-16 text-5xl text-secondary-400">♝</div>
+          <div className="absolute bottom-20 right-20 text-6xl text-secondary-600">♛</div>
+          <div className="absolute top-60 left-1/2 text-3xl text-secondary-500">♚</div>
+          <div className="absolute top-32 left-1/3 text-4xl text-secondary-400">♟</div>
         </div>
       </div>
 
@@ -46,7 +46,7 @@ const Hero = () => {
               className="text-4xl md:text-6xl lg:text-7xl font-bold leading-tight"
             >
               Master Chess with
-              <span className="block bg-gradient-to-r from-yellow-400 to-orange-500 bg-clip-text text-transparent">
+              <span className="block bg-gradient-to-r from-secondary-400 to-secondary-600 bg-clip-text text-transparent">
                 Expert Coaching
               </span>
             </motion.h1>
@@ -69,15 +69,15 @@ const Hero = () => {
             className="flex flex-wrap justify-center gap-6 md:gap-12"
           >
             <div className="flex items-center space-x-2">
-              <Star className="text-yellow-400" size={24} />
+              <Star className="text-secondary-400" size={24} />
               <span className="text-lg font-semibold">4.9 Rating</span>
             </div>
             <div className="flex items-center space-x-2">
-              <Users className="text-blue-400" size={24} />
+              <Users className="text-primary-400" size={24} />
               <span className="text-lg font-semibold">500+ Students</span>
             </div>
             <div className="flex items-center space-x-2">
-              <Award className="text-green-400" size={24} />
+              <Award className="text-secondary-500" size={24} />
               <span className="text-lg font-semibold">100+ Winners</span>
             </div>
           </motion.div>
@@ -91,7 +91,7 @@ const Hero = () => {
           >
             <button
               onClick={handleWhatsApp}
-              className="flex items-center justify-center space-x-2 bg-green-600 hover:bg-green-700 text-white px-8 py-4 rounded-lg text-lg font-semibold transform hover:scale-105 transition-all duration-200 shadow-lg"
+              className="flex items-center justify-center space-x-2 bg-gradient-to-r from-secondary-500 to-secondary-600 hover:from-secondary-600 hover:to-secondary-700 text-white px-8 py-4 rounded-lg text-lg font-semibold transform hover:scale-105 transition-all duration-200 shadow-lg"
             >
               <MessageCircle size={22} />
               <span>Book Free Demo</span>
@@ -128,17 +128,17 @@ const Hero = () => {
         <motion.div
           animate={{ y: [0, -20, 0] }}
           transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-          className="absolute top-20 left-10 w-8 h-8 bg-yellow-400/20 rounded-full"
+          className="absolute top-20 left-10 w-8 h-8 bg-secondary-400/20 rounded-full"
         />
         <motion.div
           animate={{ y: [0, -15, 0] }}
           transition={{ duration: 4, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
-          className="absolute top-40 right-20 w-6 h-6 bg-blue-400/20 rounded-full"
+          className="absolute top-40 right-20 w-6 h-6 bg-primary-400/20 rounded-full"
         />
         <motion.div
           animate={{ y: [0, -25, 0] }}
           transition={{ duration: 5, repeat: Infinity, ease: "easeInOut", delay: 1 }}
-          className="absolute bottom-40 left-20 w-10 h-10 bg-green-400/20 rounded-full"
+          className="absolute bottom-40 left-20 w-10 h-10 bg-secondary-500/20 rounded-full"
         />
       </div>
     </section>

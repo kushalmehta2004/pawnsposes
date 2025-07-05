@@ -35,19 +35,19 @@ const Gallery = () => {
       icon: Trophy,
       number: "100+",
       label: "Tournament Winners",
-      color: "text-yellow-500"
+      color: "text-secondary-500"
     },
     {
       icon: Users,
       number: "500+",
       label: "Happy Students",
-      color: "text-blue-500"
+      color: "text-primary-500"
     },
     {
       icon: Star,
       number: "4.9",
       label: "Average Rating",
-      color: "text-green-500"
+      color: "text-secondary-600"
     }
   ];
 

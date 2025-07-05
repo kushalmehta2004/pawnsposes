@@ -16,7 +16,7 @@
 
 @layer components {
   .btn-primary {
-    @apply bg-gradient-to-r from-primary-600 to-primary-700 text-white px-6 py-3 rounded-lg font-semibold hover:from-primary-700 hover:to-primary-800 transform hover:scale-105 transition-all duration-200 shadow-lg hover:shadow-xl;
+    @apply bg-gradient-to-r from-secondary-500 to-secondary-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-secondary-600 hover:to-secondary-700 transform hover:scale-105 transition-all duration-200 shadow-lg hover:shadow-xl;
   }
   
   .btn-secondary {
@@ -32,11 +32,19 @@
   }
   
   .gradient-bg {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
   }
   
   .chess-gradient {
-    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
+    background: linear-gradient(135deg, #14532d 0%, #166534 50%, #16a34a 100%);
+  }
+  
+  .royal-gradient {
+    background: linear-gradient(135deg, #16a34a 0%, #f59e0b 50%, #d97706 100%);
+  }
+  
+  .gold-gradient {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
   }
   
   .section-padding {
