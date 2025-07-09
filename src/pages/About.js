@@ -5,25 +5,17 @@ import { Award, Users, Trophy, Target, Heart, BookOpen } from 'lucide-react';
 const About = () => {
   const coaches = [
     {
-      name: "Grandmaster Rajesh Sharma",
+      name: "GM Rajesh Sharma",
       title: "Head Coach & Founder",
-      image: "/api/placeholder/300/300",
+      image: "/images/master.jpg",
       experience: "15+ years",
       achievements: ["International Master", "State Champion", "FIDE Certified"],
       bio: "With over 15 years of coaching experience, GM Rajesh has trained over 500 students and produced numerous state and national champions."
     },
     {
-      name: "IM Priya Verma",
-      title: "Senior Coach",
-      image: "/api/placeholder/300/300",
-      experience: "12+ years",
-      achievements: ["International Master", "National Champion", "Youth Coach"],
-      bio: "Specializes in coaching young talents and has helped students achieve remarkable success in junior tournaments."
-    },
-    {
-      name: "FM Arjun Patel",
+      name: "FM Meer Mehta",
       title: "Tournament Coach",
-      image: "/api/placeholder/300/300",
+      image: "/images/master 2.jpg",
       experience: "8+ years",
       achievements: ["FIDE Master", "State Champion", "Tournament Director"],
       bio: "Expert in tournament preparation and strategy development, with a track record of preparing students for competitive play."

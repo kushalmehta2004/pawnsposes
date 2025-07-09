@@ -9,24 +9,17 @@ const Gallery = () => {
   const galleryImages = [
     {
       _id: 1,
-      image: { url: "/api/placeholder/400/300" },
-      title: "National Championship Winner",
-      description: "Arjun, age 12, won the state championship after 6 months of training with us.",
+      image: { url: "/images/4th Portishead Rapid Tournament Winner.jpg" },
+      title: "4th Portishead Rapid Tournament Winner",
+      description: "Ravya Sharma secured 1st place in the 4th Portishead Junior Rapid Play Tournament on May 3, 2025 with us.",
       category: "achievements"
     },
     {
       _id: 2,
-      image: { url: "/api/placeholder/400/300" },
-      title: "Individual Coaching Session",
-      description: "One-on-one coaching helps students improve faster and build confidence.",
-      category: "training"
-    },
-    {
-      _id: 3,
-      image: { url: "/api/placeholder/400/300" },
-      title: "Group Learning Experience",
-      description: "Students learn from each other in our interactive group sessions.",
-      category: "training"
+      image: { url: "/images/5 year old USCF 1100.jpg" },
+      title: "5-Year-Old USCF 1100 Rated Tournament Winner",
+      description: "5-year-old, USCF 1100-rated, First Place Winner in the Under-11 Tournament",
+      category: "achievements"
     }
   ];
 
@@ -117,7 +110,7 @@ const Gallery = () => {
           whileInView={{ opacity: 1 }}
           transition={{ duration: 0.8, delay: 0.4 }}
           viewport={{ once: true }}
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+          className="flex flex-wrap justify-center gap-6"
         >
           {loading ? (
             Array.from({ length: 6 }, (_, i) => (
@@ -137,32 +130,25 @@ const Gallery = () => {
                 whileInView={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: index * 0.1 }}
                 viewport={{ once: true }}
-                whileHover={{ scale: 1.05 }}
-                className="cursor-pointer group"
+                whileHover={{ scale: 1.03 }}
+                className="cursor-pointer group w-full md:w-80 lg:w-96"
                 onClick={() => openModal(image)}
               >
-                <div className="card overflow-hidden">
-                  <div className="relative">
+                <div className="card overflow-hidden h-full flex flex-col">
+                  <div className="relative flex-shrink-0">
                     <img
                       src={image.image?.url || image.src}
                       alt={image.title}
-                      className="w-full h-64 object-cover transition-transform duration-300 group-hover:scale-110"
+                      className="w-full h-64 object-contain bg-gray-50 transition-transform duration-300 group-hover:scale-105"
                       onError={(e) => {
                         e.target.src = "/api/placeholder/400/300";
                       }}
                     />
-                    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-300 flex items-center justify-center">
-                      <div className="text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                        <div className="text-center">
-                          <div className="text-3xl mb-2">🔍</div>
-                          <p className="text-sm font-semibold">View Details</p>
-                        </div>
-                      </div>
-                    </div>
+
                   </div>
-                  <div className="p-6">
-                    <h3 className="text-lg font-semibold text-gray-800 mb-2">{image.title}</h3>
-                    <p className="text-gray-600 text-sm">{image.description || 'No description available'}</p>
+                  <div className="p-6 flex-grow flex flex-col">
+                    <h3 className="text-lg font-semibold text-gray-800 mb-2 flex-shrink-0">{image.title}</h3>
+                    <p className="text-gray-600 text-sm flex-grow">{image.description || 'No description available'}</p>
                   </div>
                 </div>
               </motion.div>
@@ -211,7 +197,7 @@ const Gallery = () => {
                 <img
                   src={selectedImage.image?.url || selectedImage.src}
                   alt={selectedImage.title}
-                  className="w-full h-64 md:h-96 object-cover"
+                  className="w-full h-64 md:h-96 object-contain"
                 />
                 
                 <div className="p-6">

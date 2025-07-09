@@ -17,7 +17,7 @@ const Gallery = () => {
   const galleryImages = [
     {
       id: 1,
-      src: "/api/placeholder/600/400",
+      src: "https://images.unsplash.com/photo-1529699211952-734e80c4d42b?w=400&h=300&fit=crop&crop=center",
       alt: "State Championship Winner",
       title: "Arjun - State Champion",
       description: "12-year-old Arjun won the Maharashtra State Chess Championship after 8 months of intensive training with our coaches.",
@@ -27,7 +27,7 @@ const Gallery = () => {
     },
     {
       id: 2,
-      src: "/api/placeholder/600/400",
+      src: "https://images.unsplash.com/photo-1529699211952-734e80c4d42b?w=400&h=300&fit=crop&crop=center",
       alt: "Individual coaching session",
       title: "One-on-One Coaching",
       description: "Personalized coaching sessions help students improve their game with focused attention and customized strategies.",
@@ -37,7 +37,7 @@ const Gallery = () => {
     },
     {
       id: 3,
-      src: "/api/placeholder/600/400",
+      src: "https://images.unsplash.com/photo-1529699211952-734e80c4d42b?w=400&h=300&fit=crop&crop=center",
       alt: "Group chess class",
       title: "Group Learning Session",
       description: "Students learn from each other in our interactive group classes, building friendships and competitive spirit.",
@@ -47,7 +47,7 @@ const Gallery = () => {
     },
     {
       id: 4,
-      src: "/api/placeholder/600/400",
+      src: "https://images.unsplash.com/photo-1529699211952-734e80c4d42b?w=400&h=300&fit=crop&crop=center",
       alt: "Tournament participation",
       title: "District Tournament",
       description: "Our students actively participate in various tournaments, gaining valuable competitive experience.",
@@ -57,7 +57,7 @@ const Gallery = () => {
     },
     {
       id: 5,
-      src: "/api/placeholder/600/400",
+      src: "https://images.unsplash.com/photo-1529699211952-734e80c4d42b?w=400&h=300&fit=crop&crop=center",
       alt: "National level winner",
       title: "Kavya - National Medal",
       description: "Kavya secured bronze medal at the National Junior Chess Championship, representing Maharashtra.",
@@ -67,7 +67,7 @@ const Gallery = () => {
     },
     {
       id: 6,
-      src: "/api/placeholder/600/400",
+      src: "https://images.unsplash.com/photo-1529699211952-734e80c4d42b?w=400&h=300&fit=crop&crop=center",
       alt: "Advanced strategy session",
       title: "Advanced Strategy Class",
       description: "Advanced students learning complex chess openings and endgame techniques from our expert coaches.",
@@ -77,7 +77,7 @@ const Gallery = () => {
     },
     {
       id: 7,
-      src: "/api/placeholder/600/400",
+      src: "https://images.unsplash.com/photo-1529699211952-734e80c4d42b?w=400&h=300&fit=crop&crop=center",
       alt: "Young chess prodigy",
       title: "Youngest Student Success",
       description: "6-year-old Rohan showing exceptional talent and enthusiasm for chess in our beginner's program.",
@@ -87,7 +87,7 @@ const Gallery = () => {
     },
     {
       id: 8,
-      src: "/api/placeholder/600/400",
+      src: "https://images.unsplash.com/photo-1529699211952-734e80c4d42b?w=400&h=300&fit=crop&crop=center",
       alt: "Inter-school tournament",
       title: "Inter-School Championship",
       description: "Our students dominated the inter-school chess championship, winning 1st, 2nd, and 3rd positions.",
@@ -97,7 +97,7 @@ const Gallery = () => {
     },
     {
       id: 9,
-      src: "/api/placeholder/600/400",
+      src: "https://images.unsplash.com/photo-1529699211952-734e80c4d42b?w=400&h=300&fit=crop&crop=center",
       alt: "Chess coaching certification",
       title: "Coaching Excellence",
       description: "Our coaches receiving advanced certification in chess coaching methodology and child psychology.",
@@ -107,7 +107,7 @@ const Gallery = () => {
     },
     {
       id: 10,
-      src: "/api/placeholder/600/400",
+      src: "https://images.unsplash.com/photo-1529699211952-734e80c4d42b?w=400&h=300&fit=crop&crop=center",
       alt: "Student achievement ceremony",
       title: "Monthly Achievement Ceremony",
       description: "Monthly recognition ceremony where we celebrate our students' progress and achievements.",
@@ -117,7 +117,7 @@ const Gallery = () => {
     },
     {
       id: 11,
-      src: "/api/placeholder/600/400",
+      src: "https://images.unsplash.com/photo-1529699211952-734e80c4d42b?w=400&h=300&fit=crop&crop=center",
       alt: "Online chess session",
       title: "Online Coaching Session",
       description: "During pandemic, we adapted to online coaching, ensuring uninterrupted learning for our students.",
@@ -127,7 +127,7 @@ const Gallery = () => {
     },
     {
       id: 12,
-      src: "/api/placeholder/600/400",
+      src: "https://images.unsplash.com/photo-1529699211952-734e80c4d42b?w=400&h=300&fit=crop&crop=center",
       alt: "Happy students group photo",
       title: "Our Chess Family",
       description: "Group photo of our happy students after a successful coaching session, showcasing the joy of learning chess.",
@@ -248,7 +248,7 @@ const Gallery = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.6 }}
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8"
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 auto-rows-fr"
           >
             {filteredImages.map((image, index) => (
               <motion.div
@@ -256,35 +256,26 @@ const Gallery = () => {
                 initial={{ opacity: 0, y: 30 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: index * 0.1 }}
-                whileHover={{ scale: 1.05 }}
-                className="cursor-pointer group"
+                className="cursor-pointer"
                 onClick={() => openModal(image)}
               >
-                <div className="card overflow-hidden">
+                <div className="card overflow-hidden h-full flex flex-col">
                   <div className="relative">
                     <img
                       src={image.src}
                       alt={image.alt}
-                      className="w-full h-64 object-cover transition-transform duration-300 group-hover:scale-110"
+                      className="w-full h-64 object-cover"
                     />
-                    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition-all duration-300 flex items-center justify-center">
-                      <div className="text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                        <div className="text-center">
-                          <div className="text-3xl mb-2">📸</div>
-                          <p className="text-sm font-semibold">View Full Size</p>
-                        </div>
-                      </div>
-                    </div>
                     <div className="absolute top-4 right-4">
                       <span className="bg-green-500 text-white text-xs px-3 py-1 rounded-full">
                         {image.achievement}
                       </span>
                     </div>
                   </div>
-                  <div className="p-6">
+                  <div className="p-6 flex flex-col flex-grow">
                     <h3 className="text-lg font-semibold text-gray-800 mb-2">{image.title}</h3>
-                    <p className="text-gray-600 text-sm mb-3">{image.description}</p>
-                    <div className="text-xs text-gray-500">{image.date}</div>
+                    <p className="text-gray-600 text-sm mb-3 flex-grow">{image.description}</p>
+                    <div className="text-xs text-gray-500 mt-auto">{image.date}</div>
                   </div>
                 </div>
               </motion.div>

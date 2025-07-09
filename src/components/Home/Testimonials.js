@@ -10,7 +10,6 @@ const Testimonials = () => {
       _id: 1,
       name: "Rajesh Kumar",
       designation: "Parent of Arjun (Age 10)",
-      image: { url: "/api/placeholder/60/60" },
       rating: 5,
       content: "My son Arjun started chess as a complete beginner. Within 6 months of coaching at PawnsPoses, he won his first tournament! The coaches are incredibly patient and skilled.",
       achievement: "State Championship Winner"
@@ -19,7 +18,6 @@ const Testimonials = () => {
       _id: 2,
       name: "Priya Sharma",
       designation: "Parent of Kavya (Age 12)",
-      image: { url: "/api/placeholder/60/60" },
       rating: 5,
       content: "The individual attention my daughter gets is amazing. Her coach noticed her strengths and helped her develop a unique playing style. She's now ranked among top 10 in her age group.",
       achievement: "District Level 2nd Place"
@@ -28,7 +26,6 @@ const Testimonials = () => {
       _id: 3,
       name: "Dr. Amit Verma",
       designation: "Parent of Rohan (Age 8)",
-      image: { url: "/api/placeholder/60/60" },
       rating: 5,
       content: "Chess has improved my son's concentration and problem-solving skills dramatically. The coaches at PawnsPoses make learning fun and engaging for young minds.",
       achievement: "School Chess Champion"
@@ -105,8 +102,7 @@ const Testimonials = () => {
                   <div className="h-4 bg-gray-200 rounded w-3/4"></div>
                   <div className="h-4 bg-gray-200 rounded w-1/2"></div>
                 </div>
-                <div className="flex items-center space-x-3 pt-4 border-t border-gray-100">
-                  <div className="w-12 h-12 bg-gray-200 rounded-full"></div>
+                <div className="pt-4 border-t border-gray-100">
                   <div className="space-y-2">
                     <div className="h-4 bg-gray-200 rounded w-24"></div>
                     <div className="h-3 bg-gray-200 rounded w-32"></div>
@@ -147,15 +143,7 @@ const Testimonials = () => {
                 )}
 
                 {/* Author Info */}
-                <div className="flex items-center space-x-3 pt-4 border-t border-gray-100">
-                  <img
-                    src={testimonial.image?.url || testimonial.image}
-                    alt={testimonial.name}
-                    className="w-12 h-12 rounded-full object-cover"
-                    onError={(e) => {
-                      e.target.src = "/api/placeholder/60/60";
-                    }}
-                  />
+                <div className="pt-4 border-t border-gray-100">
                   <div>
                     <h4 className="font-semibold text-gray-800">{testimonial.name}</h4>
                     <p className="text-sm text-gray-600">{testimonial.designation || testimonial.role}</p>
