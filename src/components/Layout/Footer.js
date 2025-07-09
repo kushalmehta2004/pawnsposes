@@ -15,9 +15,11 @@ const Footer = () => {
             {/* Company Info */}
             <div className="space-y-4">
               <div className="flex items-center space-x-2">
-                <div className="w-10 h-10 bg-gradient-to-r from-secondary-500 to-secondary-600 rounded-lg flex items-center justify-center">
-                  <span className="text-white font-bold text-xl">♛</span>
-                </div>
+                <img 
+                  src="/logo.jpg" 
+                  alt="PawnsPoses Logo" 
+                  className="w-10 h-10 object-contain rounded-lg"
+                />
                 <span className="text-2xl font-bold">PawnsPoses</span>
               </div>
               <p className="text-gray-400 text-sm leading-relaxed">
