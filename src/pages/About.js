@@ -5,20 +5,28 @@ import { Award, Users, Trophy, Target, Heart, BookOpen } from 'lucide-react';
 const About = () => {
   const coaches = [
     {
-      name: "GM Rajesh Sharma",
-      title: "Head Coach & Founder",
+      name: "Karan Pandita",
+      title: "Coach",
       image: "/images/master.jpg",
-      experience: "15+ years",
-      achievements: ["International Master", "State Champion", "FIDE Certified"],
-      bio: "With over 15 years of coaching experience, GM Rajesh has trained over 500 students and produced numerous state and national champions."
+      experience: "5+ years",
+      achievements: [ "State Champion", "FIDE Certified"],
+      bio: "With over 5 years of coaching experience, Karan Pandita has trained numerous students and helped many achieve success at state and national levels."
     },
     {
-      name: "FM Meer Mehta",
-      title: "Tournament Coach",
+      name: "Meer Mehta",
+      title: "Coach",
       image: "/images/master 2.jpg",
-      experience: "8+ years",
-      achievements: ["FIDE Master", "State Champion", "Tournament Director"],
+      experience: "5+ years",
+      achievements: ["State Champion", "FIDE Certified"],
       bio: "Expert in tournament preparation and strategy development, with a track record of preparing students for competitive play."
+    },
+    {
+      name: "Shubraj Salgotra",
+      title: "Coach",
+      image: "/images/master 3.jpg",
+      experience: "5+ years",
+      achievements: ["State Champion", "FIDE Master"],
+      bio: "Passionate and experienced, Shubraj Salgotra has spent over five years nurturing aspiring chess players and shaping champions."
     }
   ];
 

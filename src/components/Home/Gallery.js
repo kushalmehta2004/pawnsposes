@@ -20,6 +20,13 @@ const Gallery = () => {
       title: "5-Year-Old USCF 1100 Rated Tournament Winner",
       description: "5-year-old, USCF 1100-rated, First Place Winner in the Under-11 Tournament",
       category: "achievements"
+    },
+    {
+      _id: 3,
+      image: { url: "/images/Arin CSC junior Grand Prix 2025 Champion.jpg" },
+      title: "Arin CSC junior Grand Prix 2025 Champion",
+      description: "Arin wins the CSC Junior Grand Prix 2025, claiming the championship title.",
+      category: "achievements"
     }
   ];
 
