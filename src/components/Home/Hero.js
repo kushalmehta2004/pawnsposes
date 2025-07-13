@@ -4,7 +4,7 @@ import { Play, Star, Award, Users, MessageCircle } from 'lucide-react';
 
 const Hero = () => {
   const handleWhatsApp = () => {
-    window.open('https://wa.me/919320444221?text=Hi! I would like to book a free chess demo session.', '_blank');
+    window.open('https://wa.me/917895108392?text=Hi! I would like to book a free chess demo session.', '_blank');
   };
 
   const handleScrollToForm = () => {

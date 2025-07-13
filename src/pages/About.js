@@ -5,6 +5,14 @@ import { Award, Users, Trophy, Target, Heart, BookOpen } from 'lucide-react';
 const About = () => {
   const coaches = [
     {
+      name: "Aishwarya Daniel",
+      title: "Coach",
+      image: "/images/master 4.jpg",
+      experience: "5+ years",
+      achievements: ["State Champion", "FIDE Certified"],
+      bio: "Aishwarya Daniel has consistently guided students to excel at state and national levels through her focused and impactful coaching."
+    },
+    {
       name: "Karan Pandita",
       title: "Coach",
       image: "/images/master.jpg",

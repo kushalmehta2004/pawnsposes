@@ -60,7 +60,7 @@ npm start
 npm run build
 ```
 
-**Note**: Configure EmailJS credentials in `.env` file for email functionality.
+
 
 ## 📱 Pages
 

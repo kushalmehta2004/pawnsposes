@@ -4,7 +4,7 @@ import { Phone, Mail, MapPin, MessageCircle, Instagram, Facebook, Twitter } from
 
 const Footer = () => {
   const handleWhatsApp = () => {
-    window.open('https://wa.me/919320444221?text=Hi! I would like to know more about chess coaching.', '_blank');
+    window.open('https://wa.me/917895108392?text=Hi! I would like to know more about chess coaching.', '_blank');
   };
 
   return (
@@ -85,13 +85,11 @@ const Footer = () => {
                 <div className="flex items-center space-x-3 text-gray-400">
                   <Phone size={18} />
                   <div>
-                    <a href="tel:+919320444221" className="hover:text-white transition-colors">
-                      +919320444221
+                    <a href="tel:+91 7895108392" className="hover:text-white transition-colors">
+                      +91 7895108392
                     </a>
                     <br />
-                    <a href="tel:+919320444221" className="hover:text-white transition-colors">
-                      +91 9906958392
-                    </a>
+                    
                   </div>
                 </div>
                 <div className="flex items-center space-x-3 text-gray-400">

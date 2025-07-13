@@ -39,7 +39,7 @@ const Header = () => {
   };
 
   const handleWhatsApp = () => {
-    window.open('https://wa.me/919320444221?text=Hi! I would like to book a free chess demo session.', '_blank');
+    window.open('https://wa.me/917895108392?text=Hi! I would like to book a free chess demo session.', '_blank');
   };
 
   return (
@@ -81,7 +81,7 @@ const Header = () => {
           {/* Desktop CTA Buttons */}
           <div className="hidden md:flex items-center space-x-4">
             <a
-              href="tel:+919320444221"
+              href="tel:+91 7895108392"
               className="flex items-center space-x-2 px-4 py-2 text-primary-600 border border-primary-600 rounded-lg hover:bg-primary-50 transition-colors"
             >
               <Phone size={18} />
@@ -136,7 +136,7 @@ const Header = () => {
                 ))}
                 <div className="px-4 py-2 space-y-2">
                   <a
-                    href="tel:+919320444221"
+                    href="tel:+91 7895108392"
                     className="flex items-center justify-center space-x-2 w-full px-4 py-2 text-primary-600 border border-primary-600 rounded-lg hover:bg-primary-50 transition-colors"
                   >
                     <Phone size={18} />

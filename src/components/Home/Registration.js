@@ -88,7 +88,7 @@ const Registration = () => {
   };
 
   const handleWhatsApp = () => {
-    window.open('https://wa.me/919320444221?text=Hi! I would like to register for chess classes and book a free demo session.', '_blank');
+    window.open('https://wa.me/917895108392?text=Hi! I would like to register for chess classes and book a free demo session.', '_blank');
   };
 
   const ageGroups = [
@@ -343,9 +343,8 @@ const Registration = () => {
                 <div className="flex items-center space-x-3">
                   <Phone className="text-primary-600" size={20} />
                   <div>
-                    <p className="font-semibold">Phone Numbers</p>
-                    <p className="text-gray-600">+919320444221</p>
-                    <p className="text-gray-600">+91 9906958392</p>
+                    <p className="font-semibold">Phone Number</p>
+                    <p className="text-gray-600">+91 7895108392</p>
                   </div>
                 </div>
                 <div className="flex items-center space-x-3">

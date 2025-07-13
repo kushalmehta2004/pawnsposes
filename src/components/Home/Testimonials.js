@@ -167,7 +167,6 @@ const Testimonials = () => {
               {renderStars(5)}
             </div>
             <span className="text-lg font-semibold text-gray-800">4.9/5</span>
-            <span className="text-gray-600">based on 200+ reviews</span>
           </div>
         </motion.div>
 

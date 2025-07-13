@@ -55,7 +55,7 @@ const Contact = () => {
   };
 
   const handleWhatsApp = () => {
-    window.open('https://wa.me/919320444221?text=Hi! I would like to know more about chess coaching.', '_blank');
+    window.open('https://wa.me/917895108392?text=Hi! I would like to know more about chess coaching.', '_blank');
   };
 
   const handleCall = (number) => {
@@ -66,8 +66,8 @@ const Contact = () => {
     {
       icon: Phone,
       title: "Phone Numbers",
-      details: ["+919320444221", "+91 9906958392"],
-      action: () => handleCall("+919320444221"),
+      details: ["+91 7895108392"],
+      action: () => handleCall("+91 7895108392"),
       color: "text-blue-600"
     },
     {
