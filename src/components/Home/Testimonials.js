@@ -166,7 +166,7 @@ const Testimonials = () => {
             <div className="flex items-center space-x-1">
               {renderStars(5)}
             </div>
-            <span className="text-lg font-semibold text-gray-800">4.9/5</span>
+            <span className="text-lg font-semibold text-gray-800">4.9/5 rated on Google</span>
           </div>
         </motion.div>
 

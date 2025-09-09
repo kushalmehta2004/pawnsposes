@@ -73,8 +73,8 @@ const Contact = () => {
     {
       icon: Mail,
       title: "Email Address",
-      details: ["info@pawnsposes.com", "coaching@pawnsposes.com"],
-      action: () => window.open("mailto:info@pawnsposes.com", "_self"),
+      details: ["contact@pawnsposes.com"],
+      action: () => window.open("mailto:contact@pawnsposes.com", "_self"),
       color: "text-green-600"
     },
     {

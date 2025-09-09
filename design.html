@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Chess Coach</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://kit.fontawesome.com/e29405b0b2.js" crossorigin="anonymous"></script>
+
+    <style>
+        /* --- Global Styles & Variables --- */
+        :root {
+            --primary-color: #E9823A;
+            --background-color: #F8F9FA;
+            --card-bg-color: #FFFFFF;
+            --text-color: #333;
+            --text-light-color: #6c757d;
+            --border-color: #e0e0e0;
+            --success-color: #28a745;
+            --pro-bg-color: #FEF3C7;
+            --pro-text-color: #9A3412;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Nunito', sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-size: 16px;
+        }
+
+        /* --- Utility Classes --- */
+        .hidden {
+            display: none !important;
+        }
+
+        .pro-tag {
+            background-color: var(--pro-bg-color);
+            color: var(--pro-text-color);
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 8px;
+        }
+        
+        /* --- Main Card Container --- */
+        .card {
+            background-color: var(--card-bg-color);
+            padding: 2.5rem;
+            border-radius: 20px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+            text-align: center;
+            width: 100%;
+            max-width: 550px;
+            transition: all 0.3s ease;
+        }
+
+        /* --- Login Page Styles --- */
+        #login-page h1 {
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: var(--primary-color);
+            line-height: 1.2;
+        }
+
+        #login-page h2 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-top: 0.5rem;
+            margin-bottom: 2.5rem;
+        }
+
+        .steps-container {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 2.5rem;
+        }
+
+        .step {
+            flex: 1;
+        }
+
+        .step .number {
+            font-size: 2rem;
+            font-weight: 800;
+            color: var(--primary-color);
+        }
+
+        .step h3 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-top: 0.5rem;
+        }
+
+        .step p {
+            font-size: 0.9rem;
+            color: var(--text-light-color);
+        }
+
+        .input-group {
+            position: relative;
+            margin-bottom: 0.5rem;
+        }
+
+        #username-input {
+            width: 100%;
+            padding: 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            font-size: 1rem;
+        }
+
+        #analyze-btn {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            padding: 0.75rem 1.5rem;
+            border: none;
+            background-color: var(--primary-color);
+            color: white;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        #analyze-btn:hover {
+            background-color: #d6732f;
+        }
+        
+        #login-page .disclaimer {
+            font-size: 0.8rem;
+            color: var(--text-light-color);
+        }
+
+        /* --- Loading Modal Styles --- */
+        #loading-modal h2 {
+            font-size: 1.8rem;
+            margin-bottom: 2rem;
+        }
+
+        .loading-list {
+            list-style: none;
+            text-align: left;
+            font-size: 1.1rem;
+        }
+
+        .loading-list li {
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+        }
+
+        .loading-list .icon {
+            margin-right: 1rem;
+            width: 20px;
+            text-align: center;
+            color: var(--text-light-color);
+            transition: color 0.3s ease;
+        }
+
+        .loading-list li.completed .icon {
+            color: var(--success-color);
+        }
+
+        /* --- Dashboard Styles --- */
+        #dashboard-page {
+            max-width: 900px;
+            text-align: left;
+        }
+
+        .dashboard-header {
+            margin-bottom: 2.5rem;
+        }
+
+        .dashboard-header h1 {
+            font-size: 2rem;
+            font-weight: 800;
+        }
+
+        .dashboard-header p {
+            color: var(--text-light-color);
+            font-size: 1rem;
+        }
+        
+        .tabs {
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 2rem;
+        }
+
+        .tab {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            margin-bottom: -1px;
+            cursor: pointer;
+            font-weight: 600;
+            color: var(--text-light-color);
+        }
+
+        .tab.active {
+            color: var(--primary-color);
+            border-bottom: 2px solid var(--primary-color);
+        }
+
+        .dashboard-content {
+            display: flex;
+            gap: 2rem;
+        }
+        
+        .dashboard-panel {
+            flex: 1;
+            background-color: var(--background-color);
+            padding: 1.5rem;
+            border-radius: 15px;
+        }
+
+        .dashboard-panel h3 {
+            font-size: 1.25rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .diagnosis-item {
+            margin-bottom: 1.5rem;
+        }
+        
+        .diagnosis-item h4 {
+            font-size: 1rem;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+        }
+        
+        .diagnosis-item p {
+            font-size: 0.95rem;
+            color: var(--text-light-color);
+        }
+        
+        .diagnosis-item code {
+            font-family: monospace;
+            background: #e9ecef;
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+
+        .training-options {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .training-option {
+            background-color: white;
+            padding: 1rem;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .training-option.active, .training-option:hover {
+            border-color: var(--primary-color);
+            box-shadow: 0 4px 10px rgba(233, 130, 58, 0.2);
+            background-color: #FFF9F5;
+        }
+
+        .training-option h4 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+        }
+        
+        .training-option p {
+             font-size: 0.9rem;
+             color: var(--text-light-color);
+        }
+
+        /* --- Go Pro Modal Styles --- */
+        #pro-modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        #pro-modal-content {
+            background-color: white;
+            padding: 2.5rem;
+            border-radius: 20px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            width: 90%;
+            max-width: 450px;
+        }
+        
+        #pro-modal-content h2 {
+            font-size: 2rem;
+            font-weight: 800;
+            margin-bottom: 0.5rem;
+        }
+        
+        #pro-modal-content p {
+            color: var(--text-light-color);
+            margin-bottom: 2rem;
+        }
+
+        .pro-features {
+            list-style: none;
+            text-align: left;
+            margin-bottom: 2rem;
+            font-size: 1.1rem;
+        }
+        
+        .pro-features li {
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+        }
+        
+        .pro-features i {
+            color: var(--success-color);
+            margin-right: 1rem;
+        }
+
+        .pro-modal-btn {
+            width: 100%;
+            padding: 1rem;
+            border: none;
+            background-color: var(--primary-color);
+            color: white;
+            border-radius: 10px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            margin-bottom: 0.5rem;
+        }
+        
+        .pro-modal-btn:hover {
+            background-color: #d6732f;
+        }
+        
+        .maybe-later {
+            color: var(--text-light-color);
+            cursor: pointer;
+            font-weight: 600;
+        }
+        
+        /* --- Puzzle Page Styles --- */
+        #puzzle-page {
+            max-width: 950px;
+            text-align: left;
+        }
+        
+        .back-link {
+            display: inline-block;
+            margin-bottom: 1.5rem;
+            color: var(--text-light-color);
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .back-link:hover {
+            color: var(--primary-color);
+        }
+
+        .puzzle-container {
+            display: flex;
+            gap: 2rem;
+            align-items: flex-start;
+        }
+
+        .chessboard {
+            width: 480px;
+            height: 480px;
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            border: 2px solid #5C4033;
+        }
+
+        .square {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 3rem; /* Adjust piece size */
+        }
+        .square.light { background-color: #F0D9B5; }
+        .square.dark { background-color: #B58863; }
+        
+        .puzzle-controls {
+            flex: 1;
+        }
+
+        .puzzle-controls h2 {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+        .puzzle-controls p {
+            color: var(--text-light-color);
+            margin-bottom: 2rem;
+        }
+        
+        .puzzle-info {
+            text-align: center;
+            background-color: var(--background-color);
+            padding: 1rem;
+            border-radius: 10px;
+        }
+
+        .puzzle-info h3 { font-size: 1.2rem; }
+        .puzzle-info .progress {
+            font-size: 0.9rem;
+            color: var(--text-light-color);
+            margin: 0.5rem 0 1.5rem;
+        }
+
+        .puzzle-btn {
+            display: block;
+            width: 100%;
+            padding: 0.8rem;
+            margin-bottom: 0.75rem;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid var(--border-color);
+            background-color: white;
+            transition: all 0.2s;
+        }
+
+        .puzzle-btn.primary {
+            background-color: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
+
+        .puzzle-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+        }
+
+    </style>
+</head>
+<body>
+
+    <div id="login-page" class="card">
+        <h1>Stop Guessing. <br>Start Improving.</h1>
+        <h2>Your Personal AI Chess Coach is Here.</h2>
+
+        <div class="steps-container">
+            <div class="step">
+                <div class="number">1</div>
+                <h3>Connect Your Account</h3>
+                <p>Enter your username</p>
+            </div>
+            <div class="step">
+                <div class="number">2</div>
+                <h3>Get Instant Analysis</h3>
+                <p>Our AI finds your weaknesses</p>
+            </div>
+            <div class="step">
+                <div class="number">3</div>
+                <h3>Train Smarter</h3>
+                <p>Solve personalized puzzles</p>
+            </div>
+        </div>
+
+        <div class="input-group">
+            <input type="text" id="username-input" placeholder="Enter Your Lichess or Chess.com Username">
+            <button id="analyze-btn">Analyze Games</button>
+        </div>
+        <p class="disclaimer">We only need your username to find your public games. We never ask for your password.</p>
+    </div>
+
+    <div id="loading-modal" class="card hidden">
+        <h2>Analyzing Your Games...</h2>
+        <ul class="loading-list">
+            <li id="load-item-1"><span class="icon"><i class="fa-regular fa-circle"></i></span> Accessing game history...</li>
+            <li id="load-item-2"><span class="icon"><i class="fa-regular fa-circle"></i></span> Analyzing opening choices...</li>
+            <li id="load-item-3"><span class="icon"><i class="fa-regular fa-circle"></i></span> Searching for missed tactics...</li>
+            <li id="load-item-4"><span class="icon"><i class="fa-regular fa-circle"></i></span> Building your personalized puzzle set...</li>
+            <li id="load-item-5"><span class="icon"><i class="fa-regular fa-circle"></i></span> Finalizing your report!</li>
+        </ul>
+    </div>
+
+    <div id="dashboard-page" class="card hidden">
+        <div class="dashboard-header">
+            <h1>Welcome back, <span id="dashboard-username"></span>!</h1>
+            <p>Here is your personalized AI coaching dashboard.</p>
+        </div>
+
+        <div class="tabs">
+            <div class="tab active">Dashboard</div>
+            <div class="tab pro-feature">Progress Report <span class="pro-tag">PRO</span></div>
+        </div>
+
+        <div class="dashboard-content">
+            <div class="dashboard-panel">
+                <h3>Your AI Diagnosis</h3>
+                <div class="diagnosis-item">
+                    <h4>Recurring Weakness:</h4>
+                    <p>You often struggle against Knight Forks.</p>
+                </div>
+                <div class="diagnosis-item">
+                    <h4>Opening Tip:</h4>
+                    <p>In the Sicilian Defense, you miss the key <code>...c5xd4</code> recapture.</p>
+                </div>
+                <div class="diagnosis-item">
+                    <h4>Endgame Strength:</h4>
+                    <p>Your Rook and Pawn endgames are solid!</p>
+                </div>
+            </div>
+            <div class="dashboard-panel">
+                <h3>Start Your Training</h3>
+                <div class="training-options">
+                    <div id="weakness-training-btn" class="training-option active">
+                        <h4>Fix My Weaknesses</h4>
+                        <p>Puzzles for recurring issues</p>
+                    </div>
+                    <div class="training-option pro-feature">
+                        <h4>Learn From My Mistakes <span class="pro-tag">PRO</span></h4>
+                        <p>Puzzles you missed in-game</p>
+                    </div>
+                    <div class="training-option pro-feature">
+                        <h4>Master My Openings <span class="pro-tag">PRO</span></h4>
+                        <p>Puzzles from your openings</p>
+                    </div>
+                     <div class="training-option">
+                        <h4>Sharpen My Endgame</h4>
+                        <p>General endgame puzzles</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="pro-modal-overlay" class="hidden">
+        <div id="pro-modal-content">
+            <h2>Go Pro!</h2>
+            <p>Unlock your full potential. Upgrade to access all features.</p>
+            <ul class="pro-features">
+                <li><i class="fa-solid fa-circle-check"></i> Unlimited Personalized Puzzles</li>
+                <li><i class="fa-solid fa-circle-check"></i> All 4 Training Categories</li>
+                <li><i class="fa-solid fa-circle-check"></i> Detailed Progress Reports & Charts</li>
+                <li><i class="fa-solid fa-circle-check"></i> In-depth Game Analysis</li>
+            </ul>
+            <button class="pro-modal-btn">Upgrade Now</button>
+            <span class="maybe-later">Maybe Later</span>
+        </div>
+    </div>
+    
+    <div id="puzzle-page" class="card hidden">
+        <a href="#" id="back-to-dashboard" class="back-link"><i class="fa-solid fa-arrow-left"></i> Back to Dashboard</a>
+        <div class="puzzle-container">
+            <div class="chessboard" id="chessboard">
+                </div>
+            <div class="puzzle-controls">
+                <h2>Weakness Training: Knight Fork</h2>
+                <p>White to move and win.</p>
+                <div class="puzzle-info">
+                    <h3>Find the winning move!</h3>
+                    <p class="progress">Puzzle 3 of 10</p>
+                    <button class="puzzle-btn">Hint</button>
+                    <button class="puzzle-btn">Show Solution</button>
+                    <button class="puzzle-btn primary">Next Puzzle</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        // --- DOM Elements ---
+        const loginPage = document.getElementById('login-page');
+        const loadingModal = document.getElementById('loading-modal');
+        const dashboardPage = document.getElementById('dashboard-page');
+        const puzzlePage = document.getElementById('puzzle-page');
+        
+        const usernameInput = document.getElementById('username-input');
+        const analyzeBtn = document.getElementById('analyze-btn');
+        const dashboardUsername = document.getElementById('dashboard-username');
+        
+        const proModalOverlay = document.getElementById('pro-modal-overlay');
+        const proFeatureBtns = document.querySelectorAll('.pro-feature');
+        const closeModalBtns = document.querySelectorAll('.maybe-later, .pro-modal-btn');
+        
+        const weaknessTrainingBtn = document.getElementById('weakness-training-btn');
+        const backToDashboardBtn = document.getElementById('back-to-dashboard');
+        
+        // --- Event Listeners ---
+        
+        // Start Analysis
+        analyzeBtn.addEventListener('click', () => {
+            if (usernameInput.value.trim() === "") {
+                alert("Please enter a username.");
+                return;
+            }
+            loginPage.classList.add('hidden');
+            loadingModal.classList.remove('hidden');
+            startLoadingAnimation();
+        });
+
+        // Show Pro Modal
+        proFeatureBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                proModalOverlay.classList.remove('hidden');
+            });
+        });
+
+        // Close Pro Modal
+        closeModalBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                proModalOverlay.classList.add('hidden');
+            });
+        });
+        
+        // Navigate to Puzzle Page
+        weaknessTrainingBtn.addEventListener('click', () => {
+            dashboardPage.classList.add('hidden');
+            puzzlePage.classList.remove('hidden');
+            generateChessboard();
+        });
+        
+        // Navigate Back to Dashboard
+        backToDashboardBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            puzzlePage.classList.add('hidden');
+            dashboardPage.classList.remove('hidden');
+        });
+
+        // --- Functions ---
+        
+        // Simulate loading animation
+        function startLoadingAnimation() {
+            const items = document.querySelectorAll('.loading-list li');
+            items.forEach((item, index) => {
+                setTimeout(() => {
+                    item.classList.add('completed');
+                    item.querySelector('.icon').innerHTML = '<i class="fa-solid fa-circle-check"></i>';
+                }, (index + 1) * 800);
+            });
+            
+            // After animation, show dashboard
+            setTimeout(() => {
+                loadingModal.classList.add('hidden');
+                dashboardUsername.textContent = usernameInput.value;
+                dashboardPage.classList.remove('hidden');
+            }, (items.length + 1) * 800);
+        }
+        
+        // Generate the static chessboard for the puzzle page
+        function generateChessboard() {
+            const board = document.getElementById('chessboard');
+            board.innerHTML = ''; // Clear board
+            
+            // Unicode pieces for the specific puzzle shown in the video
+            const pieces = {
+                'e8': '♞', // Black Knight
+                'd5': '♜', // Black Rook
+                'c7': '♟', // Black Pawn
+                'd2': '♘', // White Knight
+                'a1': '♔', // White King
+            };
+
+            for (let row = 8; row >= 1; row--) {
+                for (let col = 1; col <= 8; col++) {
+                    const square = document.createElement('div');
+                    square.classList.add('square');
+                    const isDark = (row + col) % 2 === 1;
+                    square.classList.add(isDark ? 'dark' : 'light');
+
+                    const algebraic = String.fromCharCode(96 + col) + row;
+                    if (pieces[algebraic]) {
+                        square.textContent = pieces[algebraic];
+                    }
+                    board.appendChild(square);
+                }
+            }
+        }
+    </script>
+
+</body>
+</html>

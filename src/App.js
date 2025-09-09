@@ -8,19 +8,33 @@ import Home from './pages/Home';
 import About from './pages/About';
 import Gallery from './pages/Gallery';
 import Contact from './pages/Contact';
+import Reports from './pages/Reports';
+import ReportDisplay from './pages/ReportDisplay';
+import FullReport from './pages/FullReport';
+import PuzzlePage from './pages/PuzzlePage';
+import PuzzleDataTest from './components/PuzzleDataTest';
+import MistakeAnalysisTest from './components/MistakeAnalysisTest';
+import Phase2Summary from './components/Phase2Summary';
 import './App.css';
 
 function App() {
   return (
     <Router>
-      <div className="App">
+      <div className="App mobile-safe">
         <ScrollToTop />
         <Header />
-        <main>
+        <main className="mobile-safe">
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/about" element={<About />} />
             <Route path="/gallery" element={<Gallery />} />
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/report-display" element={<ReportDisplay />} />
+            <Route path="/full-report" element={<FullReport />} />
+            <Route path="/puzzle/:puzzleType" element={<PuzzlePage />} />
+            <Route path="/puzzle-test" element={<PuzzleDataTest />} />
+            <Route path="/mistake-analysis-test" element={<MistakeAnalysisTest />} />
+            <Route path="/phase2-summary" element={<Phase2Summary />} />
             <Route path="/contact" element={<Contact />} />
           </Routes>
         </main>

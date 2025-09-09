@@ -351,7 +351,7 @@ const Registration = () => {
                   <Mail className="text-primary-600" size={20} />
                   <div>
                     <p className="font-semibold">Email</p>
-                    <p className="text-gray-600">info@pawnsposes.com</p>
+                    <p className="text-gray-600">contact@pawnsposes.com</p>
                   </div>
                 </div>
                 <div className="flex items-center space-x-3">

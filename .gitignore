@@ -33,4 +33,4 @@ Desktop.ini
 
 # Cache
 .cache/
-.parcel-cache/
+.parcel-cache/lichess_db_puzzle.csv

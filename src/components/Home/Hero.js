@@ -15,7 +15,7 @@ const Hero = () => {
   };
 
   return (
-    <section className="relative min-h-screen flex items-center justify-center overflow-hidden pt-16 md:pt-0">
+    <section className="relative min-h-screen flex items-center justify-center overflow-hidden pt-16 md:pt-0 w-full max-w-full">
       {/* Background */}
       <div className="absolute inset-0 chess-gradient">
         <div className="absolute inset-0 bg-black/20"></div>
@@ -112,7 +112,7 @@ const Hero = () => {
             transition={{ duration: 0.8, delay: 1 }}
             className="pt-12"
           >
-            <p className="text-gray-400 text-sm mb-6">Trusted by parents and students across Mumbai</p>
+            <p className="text-gray-400 text-sm mb-6">Trusted by parents and students</p>
             <div className="flex justify-center items-center space-x-8 opacity-60">
               <div className="text-2xl">🏆</div>
               <div className="text-2xl">🎯</div>

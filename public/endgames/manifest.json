@@ -1,0 +1,57 @@
+[
+  {
+    "key": "endgame",
+    "slug": "endgame.json",
+    "count": 250
+  },
+  {
+    "key": "rook-endgame",
+    "slug": "rook-endgame.json",
+    "count": 250
+  },
+  {
+    "key": "pawn-endgame",
+    "slug": "pawn-endgame.json",
+    "count": 250
+  },
+  {
+    "key": "bishop-endgame",
+    "slug": "bishop-endgame.json",
+    "count": 250
+  },
+  {
+    "key": "knight-endgame",
+    "slug": "knight-endgame.json",
+    "count": 250
+  },
+  {
+    "key": "queen-endgame",
+    "slug": "queen-endgame.json",
+    "count": 250
+  },
+  {
+    "key": "queen-rook-endgame",
+    "slug": "queen-rook-endgame.json",
+    "count": 250
+  },
+  {
+    "key": "mate-in-1",
+    "slug": "mate-in-1.json",
+    "count": 250
+  },
+  {
+    "key": "mate-in-2",
+    "slug": "mate-in-2.json",
+    "count": 250
+  },
+  {
+    "key": "mate-in-3",
+    "slug": "mate-in-3.json",
+    "count": 250
+  },
+  {
+    "key": "zugzwang",
+    "slug": "zugzwang.json",
+    "count": 250
+  }
+]
