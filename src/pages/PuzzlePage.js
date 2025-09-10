@@ -34,9 +34,11 @@ const PuzzlePage = () => {
     loadPuzzles();
   }, [puzzleType, username]);
 
-  // Keep board orientation in sync with current puzzle and solution view
+  // Keep board orientation in sync with current FEN while puzzle is active
   useEffect(() => {
-    const side = puzzle?.sideToMove === 'black' ? 'black' : 'white';
+    if (puzzle?.completed) return; // don't flip after completion
+    const fen = puzzle?.position || puzzle?.initialPosition;
+    const side = (fen && fen.split(' ')[1] === 'b') ? 'black' : 'white';
     setOrientation(side);
   }, [currentPuzzle, puzzles]);
 
@@ -158,15 +160,47 @@ const PuzzlePage = () => {
       }
 
       // Initialize per-puzzle line tracking
-      const initialized = generatedPuzzles.map(p => ({
-        ...p,
-        initialPosition: p.position,
-        lineIndex: 0 // next expected token index in lineUci
-      }));
+      // For opening puzzles, advance one move if the line starts before the tactical moment
+      const initialized = generatedPuzzles.map(p => {
+        const tokens = (p.lineUci || '').split(/\s+/).filter(Boolean);
+        let initialPosition = p.position;
+        let initialLineIndex = 0;
+        let sideToMove = p.sideToMove;
+        try {
+          if (puzzleType === 'master-openings' && tokens.length > 0) {
+            const first = tokens[0];
+            if (/^[a-h][1-8][a-h][1-8](?:[qrbn])?$/i.test(first)) {
+              const engine = new Chess(initialPosition);
+              const from = first.slice(0, 2);
+              const to = first.slice(2, 4);
+              const prom = first.length > 4 ? first[4] : undefined;
+              const m = engine.move({ from, to, promotion: prom });
+              if (m) {
+                initialPosition = engine.fen();
+                initialLineIndex = 1; // start expecting the next move in the sequence
+                sideToMove = initialPosition.split(' ')[1] === 'b' ? 'black' : 'white';
+                // Also shift displayed single-move solution if present
+                if (p.solution && tokens.length > 1) {
+                  p = { ...p, solution: tokens[1] };
+                }
+              }
+            }
+          }
+        } catch (_) {}
+        return {
+          ...p,
+          initialPosition,
+          position: initialPosition,
+          lineIndex: initialLineIndex,
+          startLineIndex: initialLineIndex,
+          sideToMove
+        };
+      });
       setPuzzles(initialized);
       setPuzzleMetadata(metadata);
-      // Set board orientation based on side to move for first puzzle
-      const firstSide = initialized[0]?.sideToMove === 'black' ? 'black' : 'white';
+      // Set board orientation based on starting FEN of first puzzle
+      const firstFen = initialized[0]?.position || initialized[0]?.initialPosition;
+      const firstSide = (firstFen && firstFen.split(' ')[1] === 'b') ? 'black' : 'white';
       setOrientation(firstSide);
       console.log(`✅ Loaded ${initialized.length} puzzles:`, initialized.map(p => ({
         id: p.id,
@@ -221,26 +255,29 @@ const PuzzlePage = () => {
     setFeedback('');
     setSolutionText('');
     setShowSolution(false);
-    // Reset current puzzle to its initial FEN and line index
-    setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: pz.initialPosition, lineIndex: 0 } : pz));
-    setOrientation((puzzles[currentPuzzle]?.sideToMove === 'black') ? 'black' : 'white');
+    // Reset current puzzle to its initial FEN and its original starting line index
+    setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: pz.initialPosition, lineIndex: (typeof pz.startLineIndex === 'number' ? pz.startLineIndex : 0) } : pz));
+    // Orientation from the reset position
+    const side = (puzzles[currentPuzzle]?.initialPosition || puzzles[currentPuzzle]?.position || '').split(' ')[1] === 'b' ? 'black' : 'white';
+    setOrientation(side);
     // Force Chessboard to re-mount by changing a key
     setResetCounter((c) => c + 1);
   };
 
   const handleShowSolution = () => {
-    // Prepare full solution text without changing the board
+    // Prepare remaining solution from the CURRENT position and current line index
     const tokens = (puzzle?.lineUci || '').split(/\s+/).filter(Boolean);
-    if (!tokens.length) {
+    const curIdx = typeof puzzle?.lineIndex === 'number' ? puzzle.lineIndex : 0;
+    if (!tokens.length || curIdx >= tokens.length) {
       setSolutionText(`Solution: ${puzzle?.solution}${puzzle?.explanation ? ' — ' + puzzle.explanation : ''}`);
       setShowSolution(true);
       return;
     }
 
     try {
-      const engine = new Chess(puzzle.initialPosition || puzzle.position);
+      const engine = new Chess(puzzle.position);
       const sans = [];
-      for (let i = 0; i < tokens.length; i++) {
+      for (let i = curIdx; i < tokens.length; i++) {
         const u = tokens[i];
         if (!/^[a-h][1-8][a-h][1-8](?:[qrbn])?$/i.test(u)) break;
         const from = u.slice(0, 2);
@@ -398,10 +435,13 @@ const PuzzlePage = () => {
                           nextIdx += 1;
                         }
                         const newFen = engine.fen();
-                        setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: newFen, lineIndex: nextIdx } : pz));
-                        const side = newFen.split(' ')[1] === 'b' ? 'black' : 'white';
-                        setOrientation(side);
-                        if (nextIdx >= tokens.length) {
+                        const isDone = nextIdx >= tokens.length;
+                        setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: newFen, lineIndex: nextIdx, completed: isDone } : pz));
+                        if (!isDone) {
+                          const side = newFen.split(' ')[1] === 'b' ? 'black' : 'white';
+                          setOrientation(side);
+                        }
+                        if (isDone) {
                           setFeedback('🎉 Congratulations! You completed the puzzle.');
                         } else {
                           setFeedback(`Good move: ${san}. Keep going!`);
@@ -459,7 +499,7 @@ const PuzzlePage = () => {
                   </div>
                 )}
                 <div className="text-xs text-gray-600 mb-2">
-                  Side to move: <span className="font-semibold">{puzzle.sideToMove === 'black' ? 'Black' : 'White'}</span>
+                  Side to move: <span className="font-semibold">{orientation === 'black' ? 'Black' : 'White'}</span>
                 </div>
                 {puzzleType === 'learn-mistakes' && puzzle?.playerMove && (
                   <div className="text-xs text-gray-600 mb-2">

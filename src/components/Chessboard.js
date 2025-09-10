@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { Chess } from 'chess.js';
 
 /**
- * Interactive Chessboard
+ * Interactive Chessboard with smooth piece movement
  * - FEN input, legal moves highlighting, basic move handling
  * - Orientation (white/black), last-move highlight, coordinates on all sides
+ * - Smooth transitions for piece movement using an overlay with CSS transforms
  */
 const Chessboard = ({
   position,              // FEN string
@@ -20,7 +21,7 @@ const Chessboard = ({
   const [localFen, setLocalFen] = useState(position);
 
   // Reset local state when external position changes
-  React.useEffect(() => {
+  useEffect(() => {
     setLocalFen(position);
     setSelectedSquare(null);
     setLegalTargets([]);
@@ -128,6 +129,102 @@ const Chessboard = ({
     }
   };
 
+  // ===== Smooth piece movement overlay =====
+  const SQUARE_SIZE = 56; // px, must match boardGridStyle squares
+  const PIECE_SIZE = 46;  // px, must match pieceImgStyle
+  const PIECE_OFFSET = (SQUARE_SIZE - PIECE_SIZE) / 2; // center piece in square
+
+  const prevPiecesRef = useRef([]); // [{ id, type, color, square }]
+  const idCounterRef = useRef(0);
+  const prevOrientationRef = useRef(orientation);
+
+  // If orientation flips between renders, suppress transitions for that frame
+  const suppressTransitions = prevOrientationRef.current !== orientation;
+  useEffect(() => {
+    prevOrientationRef.current = orientation;
+  }, [orientation]);
+
+  // Helpers
+  const squareToFileRankIndex = (sq) => {
+    const file = sq.charCodeAt(0) - 'a'.charCodeAt(0); // 0..7
+    const rank = parseInt(sq[1], 10) - 1; // 0..7 where 0 = rank 1
+    return { file, rank };
+  };
+
+  const squareToXY = (sq) => {
+    const { file, rank } = squareToFileRankIndex(sq);
+    if (orientation === 'white') {
+      return {
+        x: file * SQUARE_SIZE + PIECE_OFFSET,
+        y: (7 - rank) * SQUARE_SIZE + PIECE_OFFSET,
+      };
+    } else {
+      return {
+        x: (7 - file) * SQUARE_SIZE + PIECE_OFFSET,
+        y: rank * SQUARE_SIZE + PIECE_OFFSET,
+      };
+    }
+  };
+
+  // Extract current pieces from chess.js (orientation-agnostic, uses logical squares)
+  const currentPiecesRaw = useMemo(() => {
+    const out = [];
+    const ranksArr = [8,7,6,5,4,3,2,1];
+    const filesArr = ['a','b','c','d','e','f','g','h'];
+    for (let r of ranksArr) {
+      for (let f of filesArr) {
+        const sq = `${f}${r}`;
+        const piece = chess.get(sq);
+        if (piece) {
+          out.push({ type: piece.type.toUpperCase(), color: piece.color, square: sq });
+        }
+      }
+    }
+    return out;
+  }, [chess]);
+
+  // Match current pieces to previous pieces to keep stable IDs across moves
+  const currentPiecesWithIds = useMemo(() => {
+    const prev = [...prevPiecesRef.current];
+    const usedPrev = new Set();
+
+    const distance = (a, b) => {
+      const A = squareToFileRankIndex(a);
+      const B = squareToFileRankIndex(b);
+      return Math.abs(A.file - B.file) + Math.abs(A.rank - B.rank);
+    };
+
+    const assignId = (cur) => {
+      let bestIdx = -1;
+      let bestDist = Infinity;
+      for (let i = 0; i < prev.length; i++) {
+        if (usedPrev.has(i)) continue;
+        const p = prev[i];
+        if (p.type === cur.type && p.color === cur.color) {
+          const d = distance(p.square, cur.square);
+          if (d < bestDist) {
+            bestDist = d;
+            bestIdx = i;
+          }
+        }
+      }
+      if (bestIdx !== -1) {
+        usedPrev.add(bestIdx);
+        const chosen = prev[bestIdx];
+        return { ...cur, id: chosen.id };
+      }
+      // New piece (promotion or first render)
+      idCounterRef.current += 1;
+      return { ...cur, id: `${cur.color}${cur.type}-${idCounterRef.current}` };
+    };
+
+    const mapped = currentPiecesRaw.map(assignId);
+    // Persist for next render
+    prevPiecesRef.current = mapped.map(p => ({ id: p.id, type: p.type, color: p.color, square: p.square }));
+    return mapped;
+  }, [currentPiecesRaw]);
+
+  // Styles
   const containerStyle = {
     display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '1rem'
   };
@@ -141,13 +238,17 @@ const Chessboard = ({
 
   const boardWithRanksStyle = { display: 'flex', alignItems: 'center' };
   const ranksStyle = { display: 'flex', flexDirection: 'column', width: '20px' };
-  const rankLabelStyle = { height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, color: '#444', fontSize: '0.8rem', fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial' };
+  const rankLabelStyle = { height: `${SQUARE_SIZE}px`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, color: '#444', fontSize: '0.8rem', fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial' };
 
-  const boardGridStyle = { display: 'grid', gridTemplateColumns: 'repeat(8, 56px)', gridTemplateRows: 'repeat(8, 56px)', gap: '0' };
+  const boardGridStyle = { display: 'grid', gridTemplateColumns: `repeat(8, ${SQUARE_SIZE}px)`, gridTemplateRows: `repeat(8, ${SQUARE_SIZE}px)`, gap: '0', position: 'relative' };
 
-  const squareBaseStyle = { width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' };
+  const squareBaseStyle = { width: `${SQUARE_SIZE}px`, height: `${SQUARE_SIZE}px`, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' };
 
-  const pieceImgStyle = { width: '46px', height: '46px', userSelect: 'none', pointerEvents: 'none' };
+  const overlayStyle = {
+    position: 'absolute', top: 0, left: 0, width: `${SQUARE_SIZE * 8}px`, height: `${SQUARE_SIZE * 8}px`, pointerEvents: 'none'
+  };
+
+  const pieceImgBaseStyle = { width: `${PIECE_SIZE}px`, height: `${PIECE_SIZE}px`, userSelect: 'none', pointerEvents: 'none' };
 
   const filesTop = showCoordinates ? files : [];
   const ranksLeft = showCoordinates ? ranks : [];
@@ -158,6 +259,7 @@ const Chessboard = ({
     <div style={containerStyle}>
       <div style={chessboardStyle}>
         <div style={boardGridStyle}>
+          {/* Squares grid (clickable) */}
           {boardDisplay.map((row, rowIndex) => (
             row.map((piece, colIndex) => {
               const bg = getSquareColor(rowIndex, colIndex);
@@ -187,14 +289,27 @@ const Chessboard = ({
                   {selectedSquare && legalTargets.includes(square) && (
                     <div style={{ width: 16, height: 16, borderRadius: '50%', background: 'rgba(0,0,0,0.25)' }} />
                   )}
-
-                  {piece && (
-                    <img src={pieceSrcFor(piece)} alt={piece} style={pieceImgStyle} />
-                  )}
                 </div>
               );
             })
           ))}
+
+          {/* Animated pieces overlay */}
+          <div style={overlayStyle}>
+            {currentPiecesWithIds.map(p => {
+              const code = p.color === 'w' ? p.type.toUpperCase() : p.type.toLowerCase();
+              const { x, y } = squareToXY(p.square);
+              const pieceStyle = {
+                ...pieceImgBaseStyle,
+                position: 'absolute',
+                transform: `translate(${x}px, ${y}px)`,
+                transition: suppressTransitions ? 'none' : 'transform 220ms ease',
+              };
+              return (
+                <img key={p.id} src={pieceSrcFor(code)} alt={code} style={pieceStyle} />
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>
