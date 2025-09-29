@@ -206,7 +206,7 @@ export default {
   },
 
   // Fetch a limited number of puzzles for a single opening name
-  async getPuzzlesForOpening(openingName, limit = 10) {
+  async getPuzzlesForOpening(openingName, limit = 10, difficulty = 'easy') {
     // 0) Prefer combined family file if available: /openings/_families/<family>.json
     const famSlug = slugifyOpening(String(openingName).replace(/:.+$/, '').trim());
     let shard = [];
@@ -235,11 +235,26 @@ export default {
 
     if (!shard.length) return [];
 
-    const trimmed = shard
+    // Filter by difficulty based on rating
+    const ratingRanges = {
+      easy: { min: 2000, max: 2300 },
+      medium: { min: 2300, max: 2700 },
+      hard: { min: 2700, max: Infinity }
+    };
+    const range = ratingRanges[difficulty] || ratingRanges.easy;
+    const filtered = shard.filter(row => {
+      const r = parseInt(row.Rating || row.rating || '0', 10);
+      return r >= range.min && r <= range.max;
+    });
+
+    const pool = filtered.length ? filtered : shard; // fallback to all if no matches
+
+    const trimmed = pool
       .slice(0, Math.min(limit * 2, 200)) // sample a bit more, then shuffle
       .sort(() => Math.random() - 0.5)
-      .slice(0, Math.min(limit, shard.length))
-      .map((row, i) => toAppPuzzle(row, i));
+      .slice(0, Math.min(limit, pool.length))
+      .map((row, i) => toAppPuzzle(row, i))
+      .map(p => ({ ...p, difficulty }));
     return trimmed;
   },
 

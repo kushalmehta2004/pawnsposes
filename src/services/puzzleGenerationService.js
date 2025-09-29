@@ -5,7 +5,10 @@
 
 import puzzleDataService from './puzzleDataService.js';
 import openingPuzzleService from './openingPuzzleService.js';
+import weaknessPuzzleService from './weaknessPuzzleService.js';
 import { MISTAKE_TYPES, TACTICAL_THEMES, PUZZLE_CATEGORIES, DIFFICULTY_LEVELS } from '../utils/dataModels.js';
+import stockfishAnalyzer from '../utils/stockfishAnalysis.js';
+import { Chess } from 'chess.js';
 
 class PuzzleGenerationService {
   constructor() {
@@ -79,62 +82,59 @@ class PuzzleGenerationService {
   }
 
   /**
-   * Generate puzzles for "Fix My Weaknesses" based on recurring mistake patterns
+   * Generate puzzles for "Fix My Weaknesses" using only Lichess tactic shards (no IndexedDB)
    */
   async generateWeaknessPuzzles(username, options = {}) {
-    const { maxPuzzles = 10, difficulty = 'intermediate' } = options;
-    
-    console.log(`🧩 Generating weakness puzzles for ${username}...`);
-    
+    const { maxPuzzles = 10, difficulty = 'easy' } = options;
+
+    console.log(`🧩 Generating weakness puzzles from Lichess shards (username ignored for DB) ...`);
+
     try {
-      // Get stored mistakes from database
-      const allMistakes = await puzzleDataService.getUserMistakes(username);
-      
-      console.log(`📊 Found ${allMistakes?.length || 0} stored mistakes for ${username}`);
-      
-      if (!allMistakes || allMistakes.length === 0) {
-        console.warn('⚠️ No stored mistakes found - using fallback puzzles');
-        const fallbackPuzzles = this.generateFallbackPuzzles('fix-weaknesses', maxPuzzles);
-        fallbackPuzzles.forEach(puzzle => {
-          puzzle.source = 'fallback';
-          puzzle.debugInfo = 'No stored mistakes found';
-        });
-        return fallbackPuzzles;
+      // Preferred themes to sample from shards (advanced rating preferred inside service)
+      const themePool = [
+        'fork', 'pin', 'skewer', 'discovered-attack',
+        'back-rank-mate', 'hanging-piece', 'double-attack', 'x-ray',
+        'trapped-piece', 'weak-king', 'mate-in-2', 'mate-in-3', 'mate-in-1'
+      ];
+
+      const perTheme = Math.max(2, Math.ceil(maxPuzzles / Math.min(themePool.length, 6)));
+      const batches = await Promise.all(themePool.map(t => weaknessPuzzleService.getPuzzlesForTheme(t, perTheme, difficulty)));
+      const buckets = batches.filter(b => b && b.length).map(b => [...b]);
+      if (!buckets.length) {
+        console.warn('⚠️ No tactic shards available; returning empty set.');
+        return [];
       }
 
-      // Group mistakes by type to find patterns
-      const mistakeGroups = this.groupMistakesByType(allMistakes);
-      
-      console.log(`🔍 Mistake groups:`, Object.keys(mistakeGroups).map(type => 
-        `${type}: ${mistakeGroups[type].length} mistakes`
-      ));
-      
-      // Generate puzzles for the most common mistake types
-      const puzzles = [];
-      const sortedMistakeTypes = Object.entries(mistakeGroups)
-        .sort(([,a], [,b]) => b.length - a.length)
-        .slice(0, 5); // Top 5 mistake types
+      // Interleave across themes and dedupe
+      const tokens = (s) => String(s || '').split(/\s+/).filter(Boolean);
+      const keyOf = (p) => `${p.position}::${tokens(p.lineUci).slice(0, 6).join(' ')}`;
 
-      for (const [mistakeType, mistakes] of sortedMistakeTypes) {
-        const remaining = maxPuzzles - puzzles.length;
-        if (remaining <= 0) break;
-        const perType = Math.max(1, Math.ceil(maxPuzzles / sortedMistakeTypes.length));
-        const take = Math.min(perType, remaining);
-        const puzzlesForType = await this.generatePuzzlesForMistakeType(
-          mistakeType, 
-          mistakes, 
-          take,
-          difficulty
-        );
-        puzzles.push(...puzzlesForType);
+      const seen = new Set();
+      const interleaved = [];
+      let idx = 0;
+      while (interleaved.length < maxPuzzles) {
+        let placed = false;
+        for (let i = 0; i < buckets.length && interleaved.length < maxPuzzles; i++) {
+          const b = buckets[(idx + i) % buckets.length];
+          if (b && b.length) {
+            const cand = b.shift();
+            const k = keyOf(cand);
+            if (!seen.has(k)) {
+              seen.add(k);
+              interleaved.push({ ...cand, source: 'weakness_dataset' });
+              placed = true;
+            }
+          }
+        }
+        if (!placed) break;
+        idx++;
       }
 
-      console.log(`✅ Generated ${puzzles.length} weakness puzzles from stored mistakes`);
-      return puzzles;
-      
+      console.log(`✅ Generated ${interleaved.length} weakness puzzles from shards only`);
+      return interleaved;
     } catch (error) {
-      console.error('❌ Error generating weakness puzzles:', error);
-      return this.generateFallbackPuzzles('fix-weaknesses', maxPuzzles);
+      console.error('❌ Error generating weakness puzzles (shards):', error);
+      return [];
     }
   }
 
@@ -154,12 +154,61 @@ class PuzzleGenerationService {
       
       if (!mistakes || mistakes.length === 0) {
         console.warn('⚠️ No stored mistakes found - using fallback puzzles');
-        const fallbackPuzzles = this.generateFallbackPuzzles('learn-mistakes', maxPuzzles);
-        fallbackPuzzles.forEach(puzzle => {
+        const baseFallbackPuzzles = this.generateFallbackPuzzles('learn-mistakes', maxPuzzles);
+        baseFallbackPuzzles.forEach(puzzle => {
           puzzle.source = 'fallback';
           puzzle.debugInfo = 'No stored mistakes found';
         });
-        return fallbackPuzzles;
+        // Apply multi-move enhancement to fallback puzzles too
+        const enhancedFallback = [];
+        for (const p of baseFallbackPuzzles) {
+          try {
+            const targetMin = 12;
+            const targetMax = 14;
+            let line = await extendPv(p.position, targetMin, targetMax);
+
+            if (line.length < 2) {
+              const first = toUciFromSolution(p.solution, p.position);
+              if (first) {
+                const fen2 = applyUciMove(p.position, first);
+                if (fen2) {
+                  const tail = await extendPv(fen2, Math.max(targetMin - 1, 1), targetMax - 1);
+                  line = [first, ...tail];
+                } else {
+                  line = [first];
+                }
+              }
+            }
+
+            if (line.length < targetMin) {
+              let cur = p.position;
+              for (const mv of line) {
+                const nf = applyUciMove(cur, mv);
+                if (!nf) { cur = null; break; }
+                cur = nf;
+              }
+              if (cur) {
+                const add = await stepwiseExtend(cur, targetMin - line.length, Math.max(targetMax - line.length, 1), 1000);
+                line = [...line, ...add];
+              }
+            }
+
+            if (line.length > 0) {
+              p.lineUci = line.slice(0, targetMax).join(' ');
+              p.startLineIndex = 0;
+            }
+            p.difficulty = 'advanced';
+            p.estimatedRating = 2000;
+            p.rating = 2000;
+            enhancedFallback.push(p);
+          } catch (e) {
+            p.difficulty = p.difficulty || 'advanced';
+            p.estimatedRating = p.estimatedRating || 2000;
+            p.rating = p.rating || 2000;
+            enhancedFallback.push(p);
+          }
+        }
+        return enhancedFallback;
       }
 
       // Filter mistakes that have valid FEN positions
@@ -171,12 +220,61 @@ class PuzzleGenerationService {
 
       if (mistakesWithPositions.length === 0) {
         console.warn('⚠️ No mistakes with valid positions found - using fallback puzzles');
-        const fallbackPuzzles = this.generateFallbackPuzzles('learn-mistakes', maxPuzzles);
-        fallbackPuzzles.forEach(puzzle => {
+        const baseFallbackPuzzles = this.generateFallbackPuzzles('learn-mistakes', maxPuzzles);
+        baseFallbackPuzzles.forEach(puzzle => {
           puzzle.source = 'fallback';
           puzzle.debugInfo = 'No mistakes with valid positions';
         });
-        return fallbackPuzzles;
+        // Apply multi-move enhancement to fallback puzzles too
+        const enhancedFallback = [];
+        for (const p of baseFallbackPuzzles) {
+          try {
+            const targetMin = 12;
+            const targetMax = 14;
+            let line = await extendPv(p.position, targetMin, targetMax);
+
+            if (line.length < 2) {
+              const first = toUciFromSolution(p.solution, p.position);
+              if (first) {
+                const fen2 = applyUciMove(p.position, first);
+                if (fen2) {
+                  const tail = await extendPv(fen2, Math.max(targetMin - 1, 1), targetMax - 1);
+                  line = [first, ...tail];
+                } else {
+                  line = [first];
+                }
+              }
+            }
+
+            if (line.length < targetMin) {
+              let cur = p.position;
+              for (const mv of line) {
+                const nf = applyUciMove(cur, mv);
+                if (!nf) { cur = null; break; }
+                cur = nf;
+              }
+              if (cur) {
+                const add = await stepwiseExtend(cur, targetMin - line.length, Math.max(targetMax - line.length, 1), 1000);
+                line = [...line, ...add];
+              }
+            }
+
+            if (line.length > 0) {
+              p.lineUci = line.slice(0, targetMax).join(' ');
+              p.startLineIndex = 0;
+            }
+            p.difficulty = 'advanced';
+            p.estimatedRating = 2000;
+            p.rating = 2000;
+            enhancedFallback.push(p);
+          } catch (e) {
+            p.difficulty = p.difficulty || 'advanced';
+            p.estimatedRating = p.estimatedRating || 2000;
+            p.rating = p.rating || 2000;
+            enhancedFallback.push(p);
+          }
+        }
+        return enhancedFallback;
       }
 
       // Randomize and interleave by game to avoid consecutive from the same game
@@ -185,14 +283,256 @@ class PuzzleGenerationService {
         maxPuzzles,
         (m) => m.gameId || m.game_id || m.game || m.gameNumber || null
       );
-      const puzzles = orderedMistakes.map((mistake, index) => this.convertMistakeToPuzzle(mistake, index + 1));
+      const basePuzzles = orderedMistakes.map((mistake, index) => this.convertMistakeToPuzzle(mistake, index + 1));
 
-      console.log(`✅ Generated ${puzzles.length} mistake-based puzzles from your games`);
-      return puzzles;
+      // Build multi-move lines for ALL puzzles by extending engine PVs iteratively
+      const enhanced = [];
+
+      // Helpers for UCI parsing and move application
+      const isUci = (s) => /^[a-h][1-8][a-h][1-8](?:[qrbn])?$/i.test(s || '');
+      const normalizeSan = (s) => (s || '').replace(/[+#?!]/g, '').replace(/=/g, '').trim();
+      const applyUciMove = (fen, uci) => {
+        try {
+          if (!isUci(uci)) return null;
+          const e = new Chess(fen);
+          const from = uci.slice(0, 2).toLowerCase();
+          const to = uci.slice(2, 4).toLowerCase();
+          const prom = uci.length > 4 ? uci[4].toLowerCase() : undefined;
+          const m = e.move({ from, to, promotion: prom });
+          return m ? e.fen() : null;
+        } catch {
+          return null;
+        }
+      };
+      const toUciFromSolution = (sol, fen) => {
+        try {
+          if (!sol) return null;
+          if (isUci(sol)) return sol.toLowerCase();
+          const e = new Chess(fen);
+          const m = e.move(normalizeSan(sol));
+          if (!m) return null;
+          const promo = m.promotion ? m.promotion.toLowerCase() : '';
+          return `${m.from}${m.to}${promo}`.toLowerCase();
+        } catch {
+          return null;
+        }
+      };
+      const extendPv = async (fen, wantPlies = 4, maxPlies = 8) => {
+        const out = [];
+        let curFen = fen;
+        // First analysis deeper, subsequent faster to extend - balanced for speed and quality
+        const firstTime = 3000;
+        const nextTime = 1500;
+        while (out.length < wantPlies && out.length < maxPlies) {
+          const timeBudget = out.length === 0 ? firstTime : nextTime;
+          const analysis = await stockfishAnalyzer.analyzePositionDeep(curFen, 22, timeBudget);
+          let pv = Array.isArray(analysis?.principalVariation) ? analysis.principalVariation : [];
+          if ((!pv || pv.length === 0) && analysis?.bestMove) pv = [analysis.bestMove];
+          if (!pv || pv.length === 0) break;
+          let appended = 0;
+          for (const mv of pv) {
+            if (!isUci(mv)) break;
+            const nf = applyUciMove(curFen, mv);
+            if (!nf) break;
+            out.push(mv.toLowerCase());
+            curFen = nf;
+            appended++;
+            if (out.length >= maxPlies) break;
+          }
+          if (appended === 0) break; // cannot extend further
+        }
+        return out;
+      };
+
+      // Fallback: stepwise extension using single best move per ply to guarantee a multi-move line
+      const stepwiseExtend = async (fen, minPlies = 4, maxPlies = 8, perPlyTime = 1000) => {
+        const out = [];
+        let curFen = fen;
+        while (out.length < minPlies && out.length < maxPlies) {
+          const analysis = await stockfishAnalyzer.analyzePositionDeep(curFen, 22, perPlyTime);
+          const mv = (Array.isArray(analysis?.principalVariation) && analysis.principalVariation[0]) || analysis?.bestMove;
+          if (!isUci(mv)) break;
+          const nf = applyUciMove(curFen, mv);
+          if (!nf) break;
+          out.push(mv.toLowerCase());
+          curFen = nf;
+        }
+        return out;
+      };
+
+      const enforceMinimumLine = async (fen, primaryMoveUci, targetMin, targetMax) => {
+        if (targetMin <= 0) return [];
+        let line = [];
+
+        if (primaryMoveUci && isUci(primaryMoveUci)) {
+          const fenAfterPrimary = applyUciMove(fen, primaryMoveUci);
+          if (fenAfterPrimary) {
+            const remainder = await stepwiseExtend(fenAfterPrimary, Math.max(targetMin - 1, 0), Math.max(targetMax - 1, 0), 1200);
+            if (remainder.length >= Math.max(targetMin - 1, 0)) {
+              line = [primaryMoveUci.toLowerCase(), ...remainder.slice(0, Math.max(targetMax - 1, 0))];
+            }
+          }
+        }
+
+        if (line.length < targetMin) {
+          const fallbackLine = await stepwiseExtend(fen, targetMin, targetMax, 1200);
+          if (fallbackLine.length >= targetMin) {
+            line = fallbackLine.slice(0, targetMax);
+          }
+        }
+
+        return line;
+      };
+
+      for (const p of basePuzzles) {
+        try {
+          // Target: at least 12 plies (6 full moves), up to 14 plies (7 full moves) for all puzzles
+          const targetMin = 12;
+          const targetMax = 14;
+          let line = await extendPv(p.position, targetMin, targetMax);
+
+          // Fallback: use provided solution as first move, then extend
+          if (line.length < 2) {
+            const first = toUciFromSolution(p.solution, p.position);
+            if (first) {
+              const fen2 = applyUciMove(p.position, first);
+              if (fen2) {
+                const tail = await extendPv(fen2, Math.max(targetMin - 1, 1), targetMax - 1);
+                line = [first, ...tail];
+              } else {
+                line = [first];
+              }
+            }
+          }
+
+          // If still short, stepwise-extend by re-analyzing after each ply
+          if (line.length < targetMin) {
+            let cur = p.position;
+            for (const mv of line) {
+              const nf = applyUciMove(cur, mv);
+              if (!nf) { cur = null; break; }
+              cur = nf;
+            }
+            if (cur) {
+              const add = await stepwiseExtend(cur, targetMin - line.length, Math.max(targetMax - line.length, 1), 1000);
+              line = [...line, ...add];
+            }
+          }
+
+          if (line.length < targetMin) {
+            const primaryMove = toUciFromSolution(p.solution, p.position);
+            const enforcedLine = await enforceMinimumLine(p.position, primaryMove, targetMin, targetMax);
+            if (enforcedLine.length >= targetMin) {
+              line = enforcedLine;
+            }
+          }
+
+          if (line.length < targetMin) {
+            const extendedFromStart = await stepwiseExtend(p.position, targetMin, targetMax, 1200);
+            if (extendedFromStart.length >= targetMin) {
+              line = extendedFromStart;
+            }
+          }
+
+          if (line.length < targetMin) {
+            console.warn(`⚠️ Dropping puzzle ${p?.id || ''} due to insufficient line length (${line.length} plies)`);
+            continue;
+          }
+
+          // Final trim and assign
+          p.lineUci = line.slice(0, targetMax).join(' ');
+          p.startLineIndex = 0;
+          // Tag difficulty metadata for UI/analytics
+          p.difficulty = 'advanced';
+          p.estimatedRating = 2000;
+          p.rating = 2000;
+          p.source = p.source || 'user_game';
+          enhanced.push(p);
+        } catch (e) {
+          p.difficulty = p.difficulty || 'advanced';
+          p.estimatedRating = p.estimatedRating || 2000;
+          p.rating = p.rating || 2000;
+          p.source = p.source || 'user_game';
+          enhanced.push(p);
+        }
+      }
+
+      // Sort by line length (shortest lines first for easy difficulty)
+      const toks = (s) => String(s || '').split(/\s+/).filter(Boolean);
+      enhanced.sort((a, b) => toks(a.lineUci).length - toks(b.lineUci).length);
+
+      // Assign difficulties: first 10 easy, next 10 medium, last 10 hard
+      const result = enhanced.slice(0, maxPuzzles).map((p, index) => {
+        let difficulty, rating;
+        if (index < 10) {
+          difficulty = 'easy';
+          rating = 1500 + Math.floor(Math.random() * 300); // 1500-1800
+        } else if (index < 20) {
+          difficulty = 'medium';
+          rating = 1800 + Math.floor(Math.random() * 400); // 1800-2200
+        } else {
+          difficulty = 'hard';
+          rating = 2200 + Math.floor(Math.random() * 400); // 2200-2600
+        }
+        return { ...p, difficulty, rating };
+      });
+
+      console.log(`✅ Prepared ${result.length} mistake-based puzzles from IndexedDB with difficulties assigned by line length`);
+      return result;
       
     } catch (error) {
       console.error('❌ Error generating mistake puzzles:', error);
-      return this.generateFallbackPuzzles('learn-mistakes', maxPuzzles);
+      const baseFallbackPuzzles = this.generateFallbackPuzzles('learn-mistakes', maxPuzzles);
+      // Apply multi-move enhancement to fallback puzzles in catch block too
+      const enhancedFallback = [];
+      for (const p of baseFallbackPuzzles) {
+        try {
+          const targetMin = 12;
+          const targetMax = 14;
+          let line = await extendPv(p.position, targetMin, targetMax);
+
+          if (line.length < 2) {
+            const first = toUciFromSolution(p.solution, p.position);
+            if (first) {
+              const fen2 = applyUciMove(p.position, first);
+              if (fen2) {
+                const tail = await extendPv(fen2, Math.max(targetMin - 1, 1), targetMax - 1);
+                line = [first, ...tail];
+              } else {
+                line = [first];
+              }
+            }
+          }
+
+          if (line.length < targetMin) {
+            let cur = p.position;
+            for (const mv of line) {
+              const nf = applyUciMove(cur, mv);
+              if (!nf) { cur = null; break; }
+              cur = nf;
+            }
+            if (cur) {
+              const add = await stepwiseExtend(cur, targetMin - line.length, Math.max(targetMax - line.length, 1), 1000);
+              line = [...line, ...add];
+            }
+          }
+
+          if (line.length > 0) {
+            p.lineUci = line.slice(0, targetMax).join(' ');
+            p.startLineIndex = 0;
+          }
+          p.difficulty = 'advanced';
+          p.estimatedRating = 2000;
+          p.rating = 2000;
+          enhancedFallback.push(p);
+        } catch (e) {
+          p.difficulty = p.difficulty || 'advanced';
+          p.estimatedRating = p.estimatedRating || 2000;
+          p.rating = p.rating || 2000;
+          enhancedFallback.push(p);
+        }
+      }
+      return enhancedFallback;
     }
   }
 
@@ -200,7 +540,7 @@ class PuzzleGenerationService {
    * Generate opening puzzles based on user's opening repertoire
    */
   async generateOpeningPuzzles(username, options = {}) {
-    const { maxPuzzles = 10, difficulty = 'intermediate', preferredFamilies = null } = options;
+    const { maxPuzzles = 20, difficulty = 'easy', preferredFamilies = null } = options;
     
     console.log(`🧩 Generating opening puzzles for ${username} (STRICT to most played openings)...`);
     
@@ -209,7 +549,7 @@ class PuzzleGenerationService {
       if (Array.isArray(preferredFamilies) && preferredFamilies.length) {
         const top = preferredFamilies.slice(0, 3);
         const per = Math.max(2, Math.ceil(maxPuzzles / top.length));
-        const batches = await Promise.all(top.map(name => openingPuzzleService.getPuzzlesForOpening(name, per)));
+        const batches = await Promise.all(top.map(name => openingPuzzleService.getPuzzlesForOpening(name, per, difficulty)));
         const buckets = batches.filter(b => b && b.length).map(b => [...b]);
         const result = [];
         let idx = 0;
@@ -222,28 +562,28 @@ class PuzzleGenerationService {
           if (!placed) break;
           idx++;
         }
-        console.log(`✅ Generated ${result.length} opening puzzles from preferred families (strict):`, top);
-        const final = result.slice(0, maxPuzzles).map(p => ({ ...p, source: 'opening_repertoire' }));
-        return final;
-      }
+       console.log(`✅ Generated ${result.length} opening puzzles from preferred families (strict):`, top);
+       const final = result.slice(0, maxPuzzles).map(p => ({ ...p, source: 'opening_repertoire' }));
+       return final;
+     }
 
       // Otherwise, compute the user's top openings and ONLY use those (no fallbacks)
-      const topFamilies = await openingPuzzleService.getUserTopOpenings(username, 3);
-      if (!Array.isArray(topFamilies) || topFamilies.length === 0) {
-        console.warn('⚠️ No top openings detected for user; using default popular families (strict to openings only).');
-        // Fallback to popular families to avoid empty sets while shards build
-        const defaults = ["English Opening", "French Defense", "Scotch Game", "Queen's Gambit"].slice(0, 3);
-        const per = Math.max(2, Math.ceil(maxPuzzles / defaults.length));
-        const batches = await Promise.all(defaults.map(name => openingPuzzleService.getPuzzlesForOpening(name, per)));
-        const nonEmpty = batches.filter(b => b && b.length);
-        if (!nonEmpty.length) return [];
-        const result = [];
-        let idx = 0;
-        const buckets = nonEmpty.map(b => [...b]);
-        while (result.length < maxPuzzles) {
-          let placed = false;
-          for (let i = 0; i < buckets.length && result.length < maxPuzzles; i++) {
-            const b = buckets[(idx + i) % buckets.length];
+     const topFamilies = await openingPuzzleService.getUserTopOpenings(username, 3);
+     if (!Array.isArray(topFamilies) || topFamilies.length === 0) {
+       console.warn('⚠️ No top openings detected for user; using default popular families (strict to openings only).');
+       // Fallback to popular families to avoid empty sets while shards build
+       const defaults = ["English Opening", "French Defense", "Scotch Game", "Queen's Gambit"].slice(0, 3);
+       const per = Math.max(2, Math.ceil(maxPuzzles / defaults.length));
+       const batches = await Promise.all(defaults.map(name => openingPuzzleService.getPuzzlesForOpening(name, per, difficulty)));
+       const nonEmpty = batches.filter(b => b && b.length);
+       if (!nonEmpty.length) return [];
+       const result = [];
+       let idx = 0;
+       const buckets = nonEmpty.map(b => [...b]);
+       while (result.length < maxPuzzles) {
+         let placed = false;
+         for (let i = 0; i < buckets.length && result.length < maxPuzzles; i++) {
+           const b = buckets[(idx + i) % buckets.length];
             if (b && b.length) { result.push(b.shift()); placed = true; }
           }
           if (!placed) break;
@@ -253,7 +593,7 @@ class PuzzleGenerationService {
         return final;
       }
       const per = Math.max(2, Math.ceil(maxPuzzles / topFamilies.length));
-      const batches = await Promise.all(topFamilies.map(name => openingPuzzleService.getPuzzlesForOpening(name, per)));
+      const batches = await Promise.all(topFamilies.map(name => openingPuzzleService.getPuzzlesForOpening(name, per, difficulty)));
       const nonEmpty = batches.filter(b => b && b.length);
       if (!nonEmpty.length) {
         console.warn('⚠️ No opening puzzles found in shards for user top openings; returning none (strict mode).');
@@ -286,14 +626,14 @@ class PuzzleGenerationService {
    * Generate general endgame puzzles (not user-specific)
    */
   async generateEndgamePuzzles(options = {}) {
-    const { maxPuzzles = 10, difficulty = 'intermediate' } = options;
-    
+    const { maxPuzzles = 20, difficulty = 'easy' } = options;
+
     console.log(`🧩 Generating endgame puzzles...`);
-    
+
     try {
       const mod = await import('./endgamePuzzleService.js');
       const endgameService = mod.default || mod;
-      const puzzles = await endgameService.getEndgamePuzzles(maxPuzzles);
+      const puzzles = await endgameService.getEndgamePuzzles(maxPuzzles, difficulty);
       if (Array.isArray(puzzles) && puzzles.length) return puzzles;
       console.warn('⚠️ No endgame dataset found, falling back to curated.');
       return this.generateFallbackPuzzles('sharpen-endgame', maxPuzzles);

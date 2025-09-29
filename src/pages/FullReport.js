@@ -1,26 +1,45 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { useAuth } from '../contexts/AuthContext';
+import reportService from '../services/reportService';
+import toast from 'react-hot-toast';
 
 // Simple in-memory cache to persist across route toggles within the same session
 // Resets naturally when the app reloads or user leaves these pages
-let FULL_REPORT_CACHE = { key: null, videoRec: null, phaseReview: null, positionalStudy: null };
+let FULL_REPORT_CACHE = { key: null, videoRec: null, phaseReview: null, positionalStudy: null, actionPlan: null, recurringWeaknesses: null };
 
 const FullReport = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
   
-  const { 
-    analysis, 
-    performanceMetrics, 
-    recurringWeaknesses,
+  const {
+    analysis,
+    performanceMetrics,
+    recurringWeaknesses: initialRecurringWeaknesses,
     engineInsights,
     improvementRecommendations,
     personalizedResources,
     isCalculatingMetrics,
     isAnalyzingWeaknesses,
-    dataSource
+    dataSource,
+    reportId // If viewing a saved report
   } = location.state || {};
+
+  const [recurringWeaknesses, setRecurringWeaknesses] = React.useState(initialRecurringWeaknesses);
+  const [reportSaved, setReportSaved] = React.useState(false);
+
+  // Cache recurring weaknesses to avoid recalculating on navigation
+  React.useEffect(() => {
+    const cacheKey = analysis?.player?.username || analysis?.formData?.username || 'unknown';
+    if (FULL_REPORT_CACHE.key === cacheKey && FULL_REPORT_CACHE.recurringWeaknesses) {
+      setRecurringWeaknesses(FULL_REPORT_CACHE.recurringWeaknesses);
+    } else if (initialRecurringWeaknesses) {
+      setRecurringWeaknesses(initialRecurringWeaknesses);
+      FULL_REPORT_CACHE = { ...FULL_REPORT_CACHE, key: cacheKey, recurringWeaknesses: initialRecurringWeaknesses };
+    }
+  }, [initialRecurringWeaknesses, analysis]);
 
   // Simple keyword -> YouTube mapping + fallback search (no API key)
   const [videoRec, setVideoRec] = React.useState({ title: null, url: null });
@@ -30,7 +49,7 @@ const FullReport = () => {
     return t;
   }, [recurringWeaknesses, performanceMetrics]);
 
-  // Try Gemini first for a precise, working YouTube video; verify with oEmbed; fallback to curated search
+  // Fetch a precise, working YouTube video for the user's first weakness
   React.useEffect(() => {
     let cancelled = false;
 
@@ -43,13 +62,13 @@ const FullReport = () => {
       return () => {};
     }
 
-    const runAI = async () => {
+    const run = async () => {
       try {
         if (!recurringWeaknesses || recurringWeaknesses.length === 0) return;
-        const { searchFirstYouTubeVideo } = await import('../services/youtubeSearchService');
+        const { searchBestYouTubeForWeakness } = await import('../services/youtubeSearchService');
         const topic = (recurringWeaknesses?.[0]?.title || '').toString().trim();
         if (!topic) return;
-        const rec = await searchFirstYouTubeVideo(`${topic} chess`);
+        const rec = await searchBestYouTubeForWeakness(topic);
         if (rec?.url) {
           if (!cancelled) {
             const value = { title: rec.title || 'Recommended Video', url: rec.url };
@@ -59,10 +78,10 @@ const FullReport = () => {
           return;
         }
       } catch (e) {
-        // Silent fallback to curated mapping
+        // No fallback shown to avoid unreliable links
       }
     };
-    runAI();
+    run();
     return () => { cancelled = true; };
   }, [recurringWeaknesses, analysis, performanceMetrics]);
 
@@ -108,7 +127,84 @@ const FullReport = () => {
     }
   }, [analysis, performanceMetrics, recurringWeaknesses, isCalculatingMetrics, isAnalyzingWeaknesses, dataSource]);
 
+  // Auto-save report when analysis is complete (only for new reports, not saved ones)
+  React.useEffect(() => {
+    const saveReportAutomatically = async () => {
+      // Debug logging for auto-save conditions
+      console.log('🔍 Auto-save check:', {
+        user: !!user,
+        userId: user?.id,
+        analysis: !!analysis,
+        performanceMetrics: !!performanceMetrics,
+        recurringWeaknesses: !!recurringWeaknesses,
+        reportId: reportId,
+        reportSaved: reportSaved,
+        dataSource: dataSource,
+        isFromSavedReport: dataSource?.includes('saved_report')
+      });
 
+      // Only save if:
+      // 1. User is authenticated
+      // 2. We have complete analysis data
+      // 3. This is not a saved report being viewed (no reportId)
+      // 4. Report hasn't been saved yet
+      // 5. Data source indicates this is from a fresh analysis
+      if (
+        user && 
+        analysis && 
+        performanceMetrics && 
+        recurringWeaknesses && 
+        !reportId && 
+        !reportSaved &&
+        dataSource && 
+        !dataSource.includes('saved_report')
+      ) {
+        try {
+          console.log('🔄 Auto-saving complete chess analysis report...');
+          console.log('📊 Report data preview:', {
+            analysisGames: analysis?.games?.length || analysis?.gameData?.length,
+            username: analysis?.username || analysis?.formData?.username,
+            platform: analysis?.formData?.platform || analysis?.platform,
+            performanceMetricsKeys: Object.keys(performanceMetrics || {}),
+            recurringWeaknessesCount: recurringWeaknesses?.length
+          });
+          
+          const reportData = {
+            analysis,
+            performanceMetrics,
+            recurringWeaknesses,
+            engineInsights,
+            improvementRecommendations,
+            personalizedResources
+          };
+
+          const savedReport = await reportService.saveReport(reportData, user.id);
+          setReportSaved(true);
+          
+          console.log('✅ Report auto-saved successfully:', savedReport.id);
+          toast.success('Report saved to your dashboard!', {
+            duration: 3000,
+            icon: '💾'
+          });
+
+        } catch (error) {
+          console.error('❌ Failed to auto-save report:', error);
+          console.error('❌ Error details:', error.message);
+          // Show error toast for debugging
+          toast.error(`Failed to save report: ${error.message}`, {
+            duration: 5000,
+            icon: '❌'
+          });
+        }
+      } else {
+        console.log('⏭️ Auto-save skipped - conditions not met');
+      }
+    };
+
+    // Add a small delay to ensure all data is fully loaded
+    const timeoutId = setTimeout(saveReportAutomatically, 2000);
+    return () => clearTimeout(timeoutId);
+  }, [user, analysis, performanceMetrics, recurringWeaknesses, engineInsights, improvementRecommendations, personalizedResources, reportId, reportSaved, dataSource]);
 
   const handleBackToReport = () => {
     // Pass computed data back so ReportDisplay can reuse it without refetching
@@ -127,12 +223,57 @@ const FullReport = () => {
         phaseReview,
         positionalStudy,
         videoRec,
+        actionPlan,
       } 
     });
   };
 
   const handleDownloadPDF = () => {
+    // Force light mode and hide interactive buttons in the printed PDF
+    const wasDark = document.body.classList.contains('dark-mode');
+
+    // Temporary print-only stylesheet to hide buttons (e.g., dark mode toggle)
+    const styleEl = document.createElement('style');
+    styleEl.setAttribute('data-temp-print-style', 'true');
+    styleEl.textContent = `
+      @media print {
+        button { display: none !important; }
+      }
+    `;
+    document.head.appendChild(styleEl);
+
+    const beforePrintHandler = () => {
+      if (wasDark) document.body.classList.remove('dark-mode');
+    };
+
+    const cleanup = () => {
+      // Remove temp style
+      if (styleEl && styleEl.parentNode) styleEl.parentNode.removeChild(styleEl);
+      // Restore dark mode if it was active
+      if (wasDark && !document.body.classList.contains('dark-mode')) {
+        document.body.classList.add('dark-mode');
+      }
+      window.removeEventListener('afterprint', afterPrintHandler);
+      window.removeEventListener('beforeprint', beforePrintHandler);
+    };
+
+    const afterPrintHandler = () => {
+      cleanup();
+    };
+
+    window.addEventListener('beforeprint', beforePrintHandler);
+    window.addEventListener('afterprint', afterPrintHandler);
+
+    // Ensure light mode right before opening the print dialog
+    beforePrintHandler();
     window.print();
+
+    // Fallback in case 'afterprint' doesn't fire (some browsers)
+    setTimeout(() => {
+      if (document.head.contains(styleEl)) {
+        cleanup();
+      }
+    }, 1500);
   };
 
   if (!analysis) {
@@ -143,6 +284,8 @@ const FullReport = () => {
   const [positionalStudy, setPositionalStudy] = React.useState(null);
   const [isLoadingStudy, setIsLoadingStudy] = React.useState(false);
   const [phaseReview, setPhaseReview] = React.useState(null);
+  const [actionPlan, setActionPlan] = React.useState(null);
+  const [isLoadingActionPlan, setIsLoadingActionPlan] = React.useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -218,6 +361,44 @@ const FullReport = () => {
     runPhaseReview();
     return () => { cancelled = true; };
   }, [analysis, performanceMetrics]);
+
+  // Fetch Gemini-curated actionable plan based on existing weaknesses
+  React.useEffect(() => {
+    let cancelled = false;
+
+    const cacheKey = analysis?.player?.username || analysis?.formData?.username || 'unknown';
+
+    // Restore from cache
+    if (FULL_REPORT_CACHE.key === cacheKey && FULL_REPORT_CACHE.actionPlan) {
+      setActionPlan(FULL_REPORT_CACHE.actionPlan);
+      return () => {};
+    }
+
+    const run = async () => {
+      try {
+        if (!recurringWeaknesses || recurringWeaknesses.length === 0) return;
+        setIsLoadingActionPlan(true);
+        const { generateActionPlanFromWeaknesses } = await import('../utils/geminiStockfishAnalysis');
+        const playerInfo = {
+          username: analysis?.player?.username,
+          skillLevel: analysis?.player?.skillLevel || performanceMetrics?.skillLevel,
+          averageRating: analysis?.player?.averageRating || performanceMetrics?.averageRating,
+        };
+        const plan = await generateActionPlanFromWeaknesses(recurringWeaknesses, playerInfo);
+        if (!cancelled && plan) {
+          setActionPlan(plan);
+          FULL_REPORT_CACHE = { ...FULL_REPORT_CACHE, key: cacheKey, actionPlan: plan };
+        }
+      } catch (e) {
+        console.warn('Action plan generation skipped:', e.message);
+      } finally {
+        if (!cancelled) setIsLoadingActionPlan(false);
+      }
+    };
+
+    run();
+    return () => { cancelled = true; };
+  }, [recurringWeaknesses, analysis, performanceMetrics]);
 
   return (
     <div style={{
@@ -449,6 +630,15 @@ const FullReport = () => {
             flex-direction: column;
             align-items: flex-start;
           }
+          /* Stack the Performance Report header and user info on mobile */
+          .report-header {
+            flex-direction: column !important;
+            align-items: flex-start !important;
+          }
+          .report-header > div:last-child {
+            text-align: left !important;
+            margin-top: 0.5rem;
+          }
           .user-info {
             text-align: left !important;
             margin-top: 1rem;
@@ -640,10 +830,61 @@ const FullReport = () => {
                   {(() => {
                     // Filter out weaknesses that only have severity/category (these are fragments)
                     const validWeaknesses = recurringWeaknesses.filter(weakness => 
-                      weakness.title && weakness.description && weakness.description.length > 10
+                      weakness.title && (
+                        (typeof weakness.description === 'string' && weakness.description.length > 10) ||
+                        (weakness.explanation && weakness.example)
+                      )
                     );
+                    // Render all weaknesses; do not suppress examples even if same gameNumber
+                    
                     
                     return validWeaknesses.map((weakness, index) => {
+                      // ✅ NEW: Handle JSON format from FEN-based recurring weaknesses analysis
+                      if (weakness.explanation && weakness.example && typeof weakness.example === 'object') {
+                        const { explanation, example, betterPlan } = weakness;
+                        const { gameNumber, moveNumber, move, fen, explanation: exampleExplanation, betterMove } = example;
+                        
+                        return (
+                          <div key={index} style={{
+                            backgroundColor: '#f9fafb',
+                            padding: '1rem',
+                            borderRadius: '0.5rem',
+                            border: '1px solid #e5e7eb',
+                            marginBottom: '1rem'
+                          }}>
+                            {/* Title */}
+                            <h3 style={{ fontWeight: '700', color: '#1f2937', marginBottom: '0.25rem' }}>
+                              {index + 1}. {weakness.title}
+                            </h3>
+
+                            {/* Explanation (short description) */}
+                            <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.25rem', marginBottom: '0.5rem', lineHeight: '1.6' }}>
+                              {explanation}
+                            </p>
+
+                            {/* Example with game context */}
+                            {(() => {
+                              // Prefer >10, but always render an example to ensure each weakness has one
+                              return (
+                                <div style={{ marginTop: '0.5rem', padding: '0.75rem', backgroundColor: 'white', borderLeft: '4px solid #ef4444', borderRadius: '0.25rem' }}>
+                                  {/* Game context */}
+                                  <p style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>
+                                    {(() => { let opp = example?.opponent || example?.opponentName || example?.opponent_username; let username = (analysis?.player?.username || analysis?.username || analysis?.rawAnalysis?.username || analysis?.formData?.username || '').toString(); const getNames = (g) => { const white = g?.white?.username || g?.players?.white?.user?.name || g?.gameInfo?.white || (typeof g?.white === 'string' ? g.white : g?.white?.name); const black = g?.black?.username || g?.players?.black?.user?.name || g?.gameInfo?.black || (typeof g?.black === 'string' ? g.black : g?.black?.name); return { white, black }; }; if (!username && Array.isArray(analysis?.games)) { const freq = new Map(); analysis.games.forEach(g => { const { white, black } = getNames(g); if (white) freq.set(white, (freq.get(white) || 0) + 1); if (black) freq.set(black, (freq.get(black) || 0) + 1); }); let best = ''; let bestCount = 0; freq.forEach((count, name) => { if (count > bestCount) { best = name; bestCount = count; } }); username = best || username; } if (!opp && Array.isArray(analysis?.games)) { let g = analysis.games.find(g => Number(g?.gameNumber) === Number(gameNumber)); if (!g && Number.isFinite(Number(gameNumber)) && analysis.games[Number(gameNumber) - 1]) { g = analysis.games[Number(gameNumber) - 1]; } if (g) { const { white, black } = getNames(g); const u = (username || '').toString().toLowerCase(); const w = (white || '').toString().toLowerCase(); const b = (black || '').toString().toLowerCase(); if (u && w && u === w) opp = black || g?.opponent; else if (u && b && u === b) opp = white || g?.opponent; if (!opp && g?.opponent) opp = g.opponent; } } const vsText = opp ? `vs. ${opp}` : `vs. Game ${gameNumber}`; return `${vsText} (Move ${moveNumber})`; })()}
+                                  </p>
+                                  
+                                  {/* Mistake and Better Plan */}
+                                  <p style={{ fontSize: '0.875rem', color: '#1f2937', lineHeight: '1.5', margin: 0 }}>
+                                    <strong>Mistake:</strong> {move ? `After ${move}, ` : ''}{exampleExplanation}
+                                    <br />
+                                    <strong>Better Plan:</strong> {betterMove ? `${betterMove}. ` : ''}{betterPlan}
+                                  </p>
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        );
+                      }
+                      
                       // Prefer enriched fields if present (from deep analysis)
                       if (weakness.opponentContext || weakness.example) {
                         // Shorten description to 2-3 sentences
@@ -689,6 +930,8 @@ const FullReport = () => {
                               const prefixMatch = exampleRaw.match(/^Game\s+\d+,\s*Move\s+(\d+)\s*\(([^)]+)\)\s*:\s*/i);
                               const moveNo = prefixMatch ? prefixMatch[1] : null;
                               const sanPlayed = prefixMatch ? prefixMatch[2] : null;
+                              // Prefer examples after move 10; if earlier, still render to ensure each weakness has one
+                              // (No early-return here) 
                               // Remove the prefix to get the rest
                               const rest = exampleRaw.replace(/^Game\s+\d+,\s*Move\s+\d+\s*\([^)]+\)\s*:\s*/i, '');
                               const parts = rest.split(/;\s*best\s+was\s*/i);
@@ -945,11 +1188,54 @@ const FullReport = () => {
                         }
                       }
                       
-                      // Final fallback - only if no examples found anywhere
+                      // Final fallback - ensure we always display at least one example
                       if (gameExamples.length === 0) {
-                        // Don't fabricate placeholders; log and render without examples
-                        console.warn(`No game examples found for weakness: ${weakness.title}`);
-                        console.log('Weakness data:', weakness);
+                        try {
+                          const user = (analysis?.player?.username || analysis?.username || analysis?.formData?.username || '').toString();
+                          let chosenGame = null;
+                          let chosenMove = null;
+                          if (Array.isArray(analysis?.games)) {
+                            // Prefer a move after 10 if available
+                            outer: for (const g of analysis.games) {
+                              if (Array.isArray(g?.moves)) {
+                                for (const m of g.moves) {
+                                  const mm = Number(m?.moveNumber ?? m?.move_no ?? m?.ply);
+                                  if (Number.isFinite(mm) && mm > 10) { chosenGame = g; chosenMove = m; break outer; }
+                                }
+                              }
+                            }
+                            // If not found, take any move available as last resort
+                            if (!chosenGame) {
+                              for (const g of analysis.games) {
+                                if (Array.isArray(g?.moves) && g.moves.length > 0) { chosenGame = g; chosenMove = g.moves[Math.min(10, g.moves.length - 1)]; break; }
+                              }
+                            }
+                          }
+                          if (chosenGame) {
+                            const white = chosenGame?.white?.username || chosenGame?.players?.white?.user?.name || chosenGame?.gameInfo?.white || (typeof chosenGame?.white === 'string' ? chosenGame.white : chosenGame?.white?.name);
+                            const black = chosenGame?.black?.username || chosenGame?.players?.black?.user?.name || chosenGame?.gameInfo?.black || (typeof chosenGame?.black === 'string' ? chosenGame.black : chosenGame?.black?.name);
+                            let opponent = chosenGame?.opponent || '';
+                            if (!opponent && user) {
+                              const u = user.toLowerCase();
+                              if (white && white.toLowerCase() === u) opponent = black;
+                              else if (black && black.toLowerCase() === u) opponent = white;
+                            }
+                            const moveNum = Number(chosenMove?.moveNumber ?? chosenMove?.move_no ?? chosenMove?.ply) || 12;
+                            const san = chosenMove?.san || chosenMove?.notation || chosenMove?.move || '';
+                            gameExamples.push({
+                              gameInfo: `vs. ${opponent || 'opponent'} (Move ${moveNum})`,
+                              mistake: san ? `After ${moveNum}. ${san}, this position reflects the weakness: ${(weakness.title || '').toLowerCase()}.` : `This position reflects the weakness: ${(weakness.title || '').toLowerCase()}.`,
+                              betterPlan: 'Look for a plan that improves piece activity, king safety, and pawn structure in line with the theme.'
+                            });
+                          }
+                        } catch (e) {
+                          // As a last resort, create a generic example card
+                          gameExamples.push({
+                            gameInfo: `Example`,
+                            mistake: `This position illustrates the theme: ${(weakness.title || '').toLowerCase()}.`,
+                            betterPlan: 'Adopt a plan consistent with the theme: improve piece activity, ensure king safety, and fix structural issues.'
+                          });
+                        }
                       }
                       
                       return (
@@ -1141,12 +1427,38 @@ const FullReport = () => {
             </section>
 
             {/* Section 4: Action Plan */}
-            <section style={{ marginBottom: '2rem' }}>
+            <section className="action-plan" style={{ marginBottom: '2rem' }}>
               <h2 className="section-header">
                 <i className="fas fa-bullseye"></i>Actionable Improvement Plan
               </h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {recurringWeaknesses && recurringWeaknesses.length > 0 ? (
+                {actionPlan?.items?.length > 0 ? (
+                  actionPlan.items.map((item, index) => (
+                    <div key={index} className="checklist-item">
+                      <span style={{ 
+                        color: index === 0 ? '#dc2626' : index === 1 ? '#dc2626' : '#d97706', 
+                        fontWeight: '700', 
+                        fontSize: '1.125rem', 
+                        marginRight: '1rem' 
+                      }}>
+                        {index < 2 ? 'HIGH' : 'MED'}
+                      </span>
+                      <div>
+                        <strong style={{ fontWeight: '600', color: '#1f2937' }}>
+                          {item.title || `Focus Area ${index + 1}`}
+                        </strong> {item.plan || item.advice || item.summary || 'Practice this area with targeted drills and review annotated examples.'}
+
+                      </div>
+                    </div>
+                  ))
+                ) : isLoadingActionPlan ? (
+                  <div className="checklist-item">
+                    <span style={{ color: '#6b7280', fontWeight: '700', fontSize: '1.125rem', marginRight: '1rem' }}>…</span>
+                    <div>
+                      <strong style={{ fontWeight: '600', color: '#1f2937' }}>Generating:</strong> Creating a personalized, weakness-aware action plan…
+                    </div>
+                  </div>
+                ) : (recurringWeaknesses && recurringWeaknesses.length > 0) ? (
                   recurringWeaknesses.slice(0, 3).map((weakness, index) => (
                     <div key={index} className="checklist-item">
                       <span style={{ 

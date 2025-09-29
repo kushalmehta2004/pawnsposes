@@ -1,0 +1,67 @@
+[
+  {
+    "key": "fork",
+    "slug": "fork.json",
+    "count": 400
+  },
+  {
+    "key": "pin",
+    "slug": "pin.json",
+    "count": 400
+  },
+  {
+    "key": "skewer",
+    "slug": "skewer.json",
+    "count": 400
+  },
+  {
+    "key": "discovered-attack",
+    "slug": "discovered-attack.json",
+    "count": 400
+  },
+  {
+    "key": "x-ray",
+    "slug": "x-ray.json",
+    "count": 400
+  },
+  {
+    "key": "back-rank-mate",
+    "slug": "back-rank-mate.json",
+    "count": 400
+  },
+  {
+    "key": "smothered-mate",
+    "slug": "smothered-mate.json",
+    "count": 400
+  },
+  {
+    "key": "mate-in-1",
+    "slug": "mate-in-1.json",
+    "count": 400
+  },
+  {
+    "key": "mate-in-2",
+    "slug": "mate-in-2.json",
+    "count": 400
+  },
+  {
+    "key": "mate-in-3",
+    "slug": "mate-in-3.json",
+    "count": 400
+  },
+  {
+    "key": "hanging-piece",
+    "slug": "hanging-piece.json",
+    "count": 400
+  },
+  {
+    "key": "trapped-piece",
+    "slug": "trapped-piece.json",
+    "count": 400
+  },
+  {
+    "key": "weak-king",
+    "slug": "weak-king.json",
+    "count": 400
+  }
+]

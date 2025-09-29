@@ -4,6 +4,7 @@
  */
 
 import { interpretStockfishEvaluation, detectMistakes, categorizeMistakes } from './stockfishAnalysis';
+import puzzleDataService from '../services/puzzleDataService';
 
 // Ask Gemini for dynamic Phase Review statistics based on user's games
 export const generatePhaseReviewFromGames = async (gamesSummary, playerInfo = {}) => {
@@ -169,7 +170,9 @@ ${averageRating >= 1500 ? `
    - Do NOT start weakness titles with "Game", "Move", or include parentheses like "(b3)"
    - Explain WHY this pattern keeps occurring based on the engine analysis
    - Provide 1–3 concise bullet examples in a separate "Examples" sublist under each weakness
-   - Examples should be formatted like: "Game 16, Move 17 (Kh2): [what went wrong]"
+   - Examples should be formatted like: "Game [number], Move [number] ([move played]): [what went wrong]"
+   - ENSURE DIVERSITY: Select examples from different move numbers (early, middle, late game) and both colors (white and black games)
+   - AVOID REPETITION: Do not use the same move number or similar examples for different weaknesses
    - Provide concrete improvement advice appropriate for ${skillLevel} level
    - Include an explicit "Action Plan:" line (1–2 lines, max ~220 chars) with concrete practice/checklist steps tailored to this weakness
  
@@ -196,68 +199,12 @@ Remember: The engine doesn't lie. These evaluations show exactly where improveme
   return prompt;
 };
 
-// Call Gemini API to explain Stockfish findings
-export const explainStockfishFindings = async (mistakes, playerInfo, gameContext) => {
-  const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
-  
-  if (!apiKey || apiKey === 'your_gemini_api_key_here') {
-    throw new Error('Gemini API key not configured. Please add your API key to the .env file.');
-  }
-
-  if (mistakes.length === 0) {
-    return {
-      recurringWeaknesses: [],
-      engineInsights: "No significant mistakes detected by Stockfish analysis. Your play appears to be quite solid!",
-      improvementRecommendations: "Continue practicing and analyzing your games to maintain this level of play."
-    };
-  }
-
-  const prompt = createStockfishExplanationPrompt(mistakes, playerInfo, gameContext);
-  
-  console.log('Sending Stockfish findings to Gemini for explanation...');
-  
-  try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 8192
-        },
-        safetySettings: [
-          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
-          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
-          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
-          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" }
-        ]
-      })
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
-    }
-
-    const data = await response.json();
-    
-    if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
-      throw new Error('Invalid response structure from Gemini');
-    }
-
-    const analysisText = data.candidates[0].content.parts[0].text;
-    console.log('Gemini explanation received, length:', analysisText.length);
-    
-    // Parse the response into structured data
-    return parseGeminiStockfishResponse(analysisText, mistakes);
-    
-  } catch (error) {
-    console.error('Error getting Gemini explanation:', error);
-    throw error;
-  }
+// Call Gemini API for recurring weaknesses — Gemini-only, one example per weakness
+export const explainStockfishFindings = async (_mistakes, playerInfo, gameContext) => {
+  // Always use full-games Gemini flow for recurring weaknesses
+  const result = await generateReportFromGeminiFullGames(playerInfo, gameContext);
+  if (!result) throw new Error('Gemini full-games analysis failed');
+  return result.geminiFullReport.recurringWeaknessesSection;
 };
 
 // Suggest a master game for positional study based on calculated weaknesses
@@ -326,6 +273,85 @@ Weaknesses: ${JSON.stringify(compact)}`;
     return null;
   } catch (e) {
     console.warn('Gemini positional study suggestion failed:', e.message);
+    return null;
+  }
+};
+
+// Generate a personalized, weakness-aware actionable improvement plan
+export const generateActionPlanFromWeaknesses = async (weaknesses, playerInfo = {}) => {
+  try {
+    const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+    if (!apiKey || apiKey === 'your_gemini_api_key_here') return null;
+    if (!Array.isArray(weaknesses) || weaknesses.length === 0) return null;
+
+    // Compact payload: top 3 weaknesses (title + short description)
+    const compact = weaknesses.slice(0, 3).map(w => ({
+      title: (w?.title || '').toString().slice(0, 80),
+      description: (w?.description || w?.subtitle || w?.recommendation || '').toString().slice(0, 400)
+    }));
+
+    const { username, skillLevel, averageRating } = playerInfo || {};
+
+    const prompt = `You are a world-class chess coach. Create a personalized Actionable Improvement Plan for the player, strictly based on these weaknesses.
+Return ONLY strict JSON with this schema and nothing else:
+{
+  "items": [
+    {
+      "title": string, // set exactly to the provided weakness title
+      "plan": string   // 2–3 sentences, <= 240 chars; concrete, non-generic, rating-aware
+    }
+  ]
+}
+Rules:
+- Return EXACTLY one item per provided weakness, IN THE SAME ORDER.
+- Set item.title EXACTLY equal to the corresponding weakness title.
+- Tailor depth to ${skillLevel || 'Unknown level'}${averageRating ? ` (~${averageRating})` : ''}.
+- Directly address the listed weaknesses; avoid generic boilerplate.
+- Use directive style similar to: "Prioritize Positional Security over Immediate Gains" or "King Safety First".
+- Do NOT add bullet points, checklists, or questions. Only a concise 2–3 sentence plan.
+Weaknesses: ${JSON.stringify(compact)}
+Player: ${username || 'the player'}`;
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 400 } })
+    });
+
+    if (!response.ok) return null;
+    const data = await response.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start < 0 || end <= start) return null;
+
+    let parsed;
+    try {
+      parsed = JSON.parse(text.slice(start, end + 1));
+    } catch {
+      return null;
+    }
+
+    // Normalize and validate
+    if (!parsed || !Array.isArray(parsed.items)) return null;
+
+    // Align plans 1:1 with provided weaknesses (preserve order and titles)
+    const maxItems = Math.min(compact.length, parsed.items.length, 3);
+
+    const clampText = (s, n) => (s || '').toString().trim().slice(0, n);
+
+    const items = Array.from({ length: maxItems }, (_, idx) => {
+      const src = parsed.items[idx] || {};
+      const title = clampText(compact[idx].title, 80);
+      let plan = clampText(src.plan || src.advice || src.summary || '', 240);
+      return { title, plan };
+    }).filter(i => i.plan);
+
+    if (items.length === 0) return null;
+    return { items };
+  } catch (e) {
+    console.warn('Gemini action plan generation failed:', e.message);
     return null;
   }
 };
@@ -737,7 +763,7 @@ sampleGames: ${JSON.stringify(compact.slice(0, 40))}`;
 };
 
 // Parse Gemini's enhanced deep analysis response
-const parseGeminiStockfishResponse = (analysisText, originalMistakes) => {
+const parseGeminiStockfishResponse = async (analysisText, originalMistakes) => {
   console.log('🔥 FINAL BOSS MODE: Bulletproof parsing activated!');
   
   const sections = {
@@ -962,7 +988,8 @@ const parseGeminiStockfishResponse = (analysisText, originalMistakes) => {
   };
 
   // Helper to ensure the selected mistake can produce a concrete example
-  const hasSufficientData = (m) => !!(m && m.previousFen && m.move && m.bestMove && computeDisplayedMoveNumber(m));
+  // Relaxed: allow missing bestMove/previousFen so we can diversify move numbers; we will fall back to UCI and omit SAN if needed
+  const hasSufficientData = (m) => !!(m && m.move && computeDisplayedMoveNumber(m));
   const scoreMistakeForWeakness = (m, title) => (
     (title.includes('tactic') && (m.mistakeType === 'blunder' || m.mistakeCategory === 'tactical') ? 3 : 0) +
     (title.includes('opening') && m.mistakeCategory === 'opening' ? 2 : 0) +
@@ -979,81 +1006,646 @@ const parseGeminiStockfishResponse = (analysisText, originalMistakes) => {
       .map(x => x.m);
   };
 
-  sections.recurringWeaknesses = sections.recurringWeaknesses.map(w => {
-    const shortExplanation = trimToSentences(w.description || '', 3);
+  // Build a compact prompt for Gemini to justify a specific mistake
+  const buildMistakeJustificationPrompt = (m, { mv, userMoveColor, playedSAN, bestSAN, opponentName }) => {
+    const beforeFEN = m.previousFen || '';
+    const afterFEN = m.position?.fen || '';
+    const pv = Array.isArray(m.principalVariation) ? m.principalVariation.slice(0, 6).join(' ') : '';
 
-    // 1) Try to bind to any AI-provided example reference (Game X, Move Y)
-    let representative = null;
-    if (Array.isArray(w.examples) && w.examples.length > 0) {
-      for (const ex of w.examples) {
-        const ref = parseExampleRef(ex);
-        if (ref) {
+    // Signed evals from player's perspective
+    const toPawns = (cp, color) => {
+      if (typeof cp !== 'number') return '+0.0';
+      const s = color === 'black' ? -cp : cp;
+      const p = s / 100;
+      return p >= 0 ? `+${p.toFixed(1)}` : p.toFixed(1);
+    };
+    const evalNow = toPawns(m.evaluation?.score, userMoveColor);
+    const evalBefore = toPawns(m.previousEvaluation?.score, userMoveColor);
+
+    // Move prefix like 16... for black, 16. for white
+    const movePrefix = mv != null ? `${mv}${userMoveColor === 'black' ? '...' : '.'}` : '';
+
+    // Clear instruction to return only the two labeled sentences in one line
+    const instructions = `You are a strong chess coach. Justify why the player's move is a mistake using the position context and propose the better plan.
+Return EXACTLY one line in this format (no extra text):
+Mistake: ${movePrefix}${playedSAN || '...'} ?! (${evalNow}) <one concise sentence explaining why it was a mistake>. Better Plan: ${movePrefix}${bestSAN || '...'}! (${evalBefore}) <one concise sentence explaining why this plan is better>.`;
+
+    const context = {
+      moveNumber: mv,
+      userMoveColor,
+      opponent: opponentName || null,
+      playedSAN: playedSAN || m.move,
+      bestSAN: bestSAN || m.bestMove,
+      evalNow,
+      evalBefore,
+      uciPlayed: m.move,
+      uciBest: m.bestMove,
+      principalVariation: pv
+    };
+
+    return `${instructions}
+
+Context:
+- FEN before: ${beforeFEN}
+- FEN after: ${afterFEN}
+- UCI played: ${m.move}
+- UCI best: ${m.bestMove}
+- PV: ${pv}`;
+  };
+
+  // Send one representative mistake to Gemini to obtain a refined justification line
+  const refineMistakeExampleWithGemini = async (m, meta) => {
+    try {
+      const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+      if (!apiKey || apiKey === 'your_gemini_api_key_here') return null;
+
+      const prompt = buildMistakeJustificationPrompt(m, meta);
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.2, maxOutputTokens: 256 }
+        })
+      });
+      if (!response.ok) return null;
+      const data = await response.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (!text) return null;
+
+      // Must contain both labels; keep it single line
+      if (/^Mistake:\s*/i.test(text) && /\bBetter\s*Plan:\s*/i.test(text)) {
+        return text.replace(/\s+/g, ' ').trim();
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  };
+
+  // Rebuild recurring weaknesses with a diversity-first selector that mirrors the PDF style
+  const buildRecurringWeaknessesFinal = async () => {
+    const result = [];
+
+    // Helper: more resilient displayed move number: recompute from FEN first to avoid stale values
+    const displayedMove = (m) => {
+      // First, derive from FEN/turn to avoid stale cached values
+      const derived = computeDisplayedMoveNumber(m);
+      if (derived != null && !isNaN(derived)) return derived;
+      // Fallback: use stored numbers if present
+      const stored = (typeof m?.moveNumber === 'number' && !isNaN(m.moveNumber))
+        ? m.moveNumber
+        : (typeof m?.position?.moveNumber === 'number' && !isNaN(m.position.moveNumber))
+          ? m.position.moveNumber
+          : null;
+      return stored != null ? stored : null;
+    };
+
+    // Phase buckets to spread examples across the game (Early/Mid/Late)
+    const bucketFor = (mv) => {
+      if (!mv || isNaN(mv)) return 1; // default to mid
+      if (mv <= 12) return 0;        // early
+      if (mv <= 24) return 1;        // mid
+      return 2;                       // late
+    };
+
+    // Scoring for candidates with diversity and relevance
+    const scoreCandidate = (m, weakness, targetBucket) => {
+      const mv = displayedMove(m) ?? 0;
+      const b = bucketFor(mv);
+      const bucketBonus = 2 - Math.min(2, Math.abs(b - targetBucket)); // prefer closer bucket
+      const title = (weakness.title || '').toLowerCase();
+      const relevance = (
+        (title.includes('tactic') && (m.mistakeType === 'blunder' || m.mistakeCategory === 'tactical') ? 3 : 0) +
+        (title.includes('opening') && m.mistakeCategory === 'opening' ? 2 : 0) +
+        (title.includes('endgame') && m.mistakeCategory === 'endgame' ? 2 : 0) +
+        (title.includes('positional') && (m.mistakeType === 'mistake' || m.mistakeCategory === 'positional') ? 2 : 0)
+      );
+      const drop = (m.scoreDrop || 0) / 200; // magnitude of error
+      return bucketBonus * 3 + relevance + drop;
+    };
+
+    // Build context + example lines to match the requested PDF-like style
+    const buildContextAndExample = (m) => {
+      const mv = displayedMove(m);
+      const opponentName = getOpponentNameFromGameInfo(m.position?.gameInfo, m.userColor);
+      const colorPlayed = m.userColor ? (m.userColor.charAt(0).toUpperCase() + m.userColor.slice(1)) : null;
+      const playedSAN = formatPlayedMoveSAN(m);
+      const bestSAN = formatBestMoveSAN(m);
+
+      // Determine user's move color (who just moved)
+      const userMoveColor = m.userColor || (m.turn === 'white' ? 'black' : 'white');
+
+      // Helper: map mistake type to annotation
+      const annotateMistake = (type) => {
+        switch ((type || '').toLowerCase()) {
+          case 'blunder': return '??';
+          case 'mistake': return '?';
+          case 'inaccuracy': return '?!';
+          case 'missed_win': return '??';
+          default: return '?';
+        }
+      };
+
+      // Helper: evaluation shown from the player's perspective, in pawns with sign
+      const formatUserEval = (evaluation, color) => {
+        if (!evaluation || typeof evaluation.score !== 'number') return '+0.0';
+        const cp = color === 'black' ? -evaluation.score : evaluation.score; // flip for black
+        const pawns = cp / 100;
+        return pawns >= 0 ? `+${pawns.toFixed(1)}` : pawns.toFixed(1);
+      };
+
+      const mistakeEval = formatUserEval(m.evaluation, userMoveColor);
+      const bestEval = formatUserEval(m.previousEvaluation, userMoveColor);
+      const evalText = m.evaluation?.description || '';
+      const bestEvalText = m.previousEvaluation?.description || '';
+
+      const opponentContext = opponentName
+        ? `vs. ${opponentName} (Move ${mv})${colorPlayed ? ` \nYou played: ${colorPlayed}` : ''}`
+        : `(Move ${mv})${colorPlayed ? ` \nYou played: ${colorPlayed}` : ''}`;
+
+      const movePrefix = mv != null ? `${mv}${userMoveColor === 'black' ? '...' : '.'}` : '';
+      const mistakeLine = `${movePrefix}${playedSAN || '...'}${annotateMistake(m.mistakeType)} (${mistakeEval})${evalText ? ` ${evalText}` : ''}`;
+      const betterPlanLine = `${movePrefix}${bestSAN || '...'}! (${bestEval})${bestEvalText ? ` ${bestEvalText}` : ''}`;
+
+      const example = `Mistake: ${mistakeLine}\nBetter Plan: ${betterPlanLine}`;
+      return { opponentContext, example };
+    };
+
+    // Prepare global trackers
+    const usedGameMoves = new Set(); // "game:move" pairs
+    const usedGames = new Set();
+    const usedMoveNumbers = new Set();
+    const usedUniqueMistakes = new Set();
+    const usedUserColors = new Set();
+
+    const weaknessCount = Math.min(sections.recurringWeaknesses.length, 3);
+    const buckets = weaknessCount === 1 ? [1] : (weaknessCount === 2 ? [0, 2] : [0, 1, 2]);
+
+    for (let i = 0; i < weaknessCount; i++) {
+      const w = sections.recurringWeaknesses[i];
+      const shortExplanation = trimToSentences(w.description || '', 3);
+      const targetBucket = buckets[i] ?? 1;
+
+      // Build ranked candidate list for this weakness
+      const baseCandidates = getCandidatesForWeakness(originalMistakes, w).filter(m => !!(m && m.move && displayedMove(m)));
+
+      // Try to map AI explicit references first
+      const referenced = [];
+      if (Array.isArray(w.examples) && w.examples.length > 0) {
+        for (const ex of w.examples) {
+          const ref = parseExampleRef(ex);
+          if (!ref) continue;
           const m = originalMistakes.find(mk => {
             const sameGame = ref.gameNumber == null || mk.position?.gameNumber === ref.gameNumber;
-            const sameMove = computeDisplayedMoveNumber(mk) === ref.moveNumber;
+            const sameMove = (displayedMove(mk) === ref.moveNumber);
             return sameGame && sameMove;
           });
-          if (m && hasSufficientData(m) && !usedUniqueMistakes.has(uniqueKeyForMistake(m))) {
-            representative = m;
-            break;
+          if (m && !usedUniqueMistakes.has(uniqueKeyForMistake(m)) && !!(m.move && displayedMove(m))) {
+            referenced.push(m);
           }
         }
       }
-    }
 
-    // 2) If none, select best candidate that is unused and has sufficient data
-    if (!representative) {
-      const candidates = getCandidatesForWeakness(originalMistakes, w);
-      representative = candidates.find(m => !usedUniqueMistakes.has(uniqueKeyForMistake(m))) || null;
-      // 3) If still none (all used), allow reuse of a candidate to avoid empty example
-      if (!representative && candidates.length > 0) {
-        representative = candidates[0];
+      // Decide desired color to enforce alternation if possible
+      const desiredColor = (() => {
+        if (usedUserColors.size === 0) return null; // no preference for the first pick
+        if (usedUserColors.has('white') && !usedUserColors.has('black')) return 'black';
+        if (usedUserColors.has('black') && !usedUserColors.has('white')) return 'white';
+        return null;
+      })();
+
+      const combined = [...new Set([...(referenced || []), ...baseCandidates])];
+      // Rank with diversity-aware score and strongly penalize previously used move numbers/games
+      const ranked = combined
+        .map(m => {
+          const mvn = displayedMove(m);
+          const gm = m.position?.gameNumber;
+          const key = `${gm ?? 'N'}:${mvn ?? 'M'}`;
+          const color = m.userColor || null; // rely only on actual user color when known
+          let score = scoreCandidate(m, w, targetBucket);
+          // Strongly discourage reusing the same move number across weaknesses
+          if (usedMoveNumbers.has(mvn)) score -= 1000;
+          // Discourage exact game:move reuse and same-game reuse
+          if (usedGameMoves.has(key)) score -= 600;
+          if (usedGames.has(gm)) score -= 250;
+          // Strongly discourage reusing same user color; prefer alternation when desiredColor exists
+          if (color && usedUserColors.has(color)) score -= 500;
+          if (desiredColor && color && color === desiredColor) score += 200;
+          return { m, s: score };
+        })
+        .sort((a, b) => b.s - a.s)
+        .map(x => x.m);
+
+      // Selection function honoring uniqueness
+      const select = () => {
+        // Pass 1: unused move, game, and user color; enforce desiredColor if set
+        const p1 = ranked.find(m => {
+          const mv = displayedMove(m);
+          const gm = m.position?.gameNumber;
+          const key = `${gm ?? 'N'}:${mv ?? 'M'}`;
+          const color = m.userColor || null;
+          const colorOk = desiredColor ? (color && color === desiredColor) : (!color || !usedUserColors.has(color));
+          return !usedUniqueMistakes.has(uniqueKeyForMistake(m)) && !usedMoveNumbers.has(mv) && !usedGames.has(gm) && !usedGameMoves.has(key) && colorOk;
+        });
+        if (p1) return p1;
+        // Pass 2: unused move number and color (even if game was used); enforce desiredColor if set
+        const p2 = ranked.find(m => {
+          const mv = displayedMove(m);
+          const key = `${m.position?.gameNumber ?? 'N'}:${mv ?? 'M'}`;
+          const color = m.userColor || null;
+          const colorOk = desiredColor ? (color && color === desiredColor) : (!color || !usedUserColors.has(color));
+          return !usedUniqueMistakes.has(uniqueKeyForMistake(m)) && !usedMoveNumbers.has(mv) && !usedGameMoves.has(key) && colorOk;
+        });
+        if (p2) return p2;
+        // Pass 3: prefer a different move number even if other constraints are violated
+        const p3 = ranked.find(m => {
+          const mv = displayedMove(m);
+          return !usedMoveNumbers.has(mv);
+        });
+        if (p3) return p3;
+        // Pass 4: any unused mistake
+        const p4 = ranked.find(m => !usedUniqueMistakes.has(uniqueKeyForMistake(m)));
+        if (p4) return p4;
+        // Fallback: first available
+        return ranked[0] || null;
+      };
+
+      const representative = select();
+
+      // Build final object
+      let opponentContext = null;
+      let example = null;
+      if (representative) {
+        const mv = displayedMove(representative);
+        const gm = representative.position?.gameNumber;
+        const gameKey = `${gm ?? 'N'}:${mv ?? 'M'}`;
+        const color = representative.userColor || null; // only track actual user color for diversity
+        usedUniqueMistakes.add(uniqueKeyForMistake(representative));
+        if (gm != null) usedGames.add(gm);
+        if (mv != null) usedMoveNumbers.add(mv);
+        if (color) usedUserColors.add(color);
+        usedGameMoves.add(gameKey);
+
+        // Local formatting first (fallback)
+        const built = buildContextAndExample(representative);
+        opponentContext = built.opponentContext;
+        example = built.example;
+
+        // Try Gemini refinement for a single-line enhanced justification
+        const meta = {
+          mv,
+          userMoveColor: representative.userColor || (representative.turn === 'white' ? 'black' : 'white'),
+          playedSAN: formatPlayedMoveSAN(representative),
+          bestSAN: formatBestMoveSAN(representative),
+          opponentName: getOpponentNameFromGameInfo(representative.position?.gameInfo, representative.userColor)
+        };
+        // Note: executed asynchronously but awaited within this build to keep API contained here
+        // If the call fails or key is missing, we keep the original example
+        try {
+          // eslint-disable-next-line no-undef
+          if (typeof fetch === 'function') {
+            // Await so the final object includes refined example when available
+            const refined = await refineMistakeExampleWithGemini(representative, meta);
+            if (refined && /^Mistake:/i.test(refined)) {
+              // Preserve our opponentContext; keep UI contract by inserting a newline before "Better Plan:"
+              const formatted = refined.replace(/\s*Better\s*Plan:\s*/i, "\nBetter Plan: ");
+              example = formatted;
+            }
+          }
+        } catch (_) {}
       }
+
+      // Extract Action Plan from AI text when present; fallback to local generator
+      const extractActionPlan = (txt) => {
+        if (!txt) return null;
+        const m = txt.match(/Action\s*Plan:\s*([^\n]+)(?:\n|$)/i);
+        if (m && m[1]) return m[1].trim();
+        const firstLines = txt.split(/\n+/).slice(0, 3).map(s => s.trim());
+        const cand = firstLines.find(s => /^(Practice|Identify|Before|Use|Adopt|Run|Evaluate|Prepare|Activate|Choose|Write|Count)\b/i.test(s));
+        return cand || null;
+      };
+
+      const actionPlanFromAI = extractActionPlan(w.description);
+
+      result.push({
+        ...w,
+        description: shortExplanation,
+        actionPlan: actionPlanFromAI || generateActionPlanForWeakness(w.title, w.category),
+        opponentContext,
+        example
+      });
     }
 
-    let opponentContext = null;
-    let example = null;
+    return result;
+  };
 
-    if (representative) {
-      const key = uniqueKeyForMistake(representative);
-      usedUniqueMistakes.add(key);
-
-      const opponentName = getOpponentNameFromGameInfo(representative.position?.gameInfo, representative.userColor);
-      const moveNum = computeDisplayedMoveNumber(representative);
-      const gameKey = `${representative.position?.gameNumber || 'N'}:${moveNum || 'M'}`;
-      usedGameMoves.add(gameKey);
-      if (representative.position?.gameNumber) usedGames.add(representative.position.gameNumber);
-      if (moveNum) usedMoveNumbers.add(moveNum);
-
-      opponentContext = opponentName ? `vs ${opponentName} (Move ${moveNum})` : `(Move ${moveNum})`;
-      const scoreDrop = ((representative.scoreDrop || 0) / 100).toFixed(1);
-      example = `Game ${representative.position?.gameNumber || 'N/A'}, Move ${moveNum} (${formatPlayedMoveSAN(representative)}): ${representative.mistakeType} losing ${scoreDrop} pawns; best was ${formatBestMoveSAN(representative)}.`;
-    }
-
-    
-    // Extract Action Plan from AI text when present; fallback to local generator
-    const extractActionPlan = (txt) => {
-      if (!txt) return null;
-      const m = txt.match(/Action\s*Plan:\s*([^\n]+)(?:\n|$)/i);
-      if (m && m[1]) return m[1].trim();
-      const firstLines = txt.split(/\n+/).slice(0, 3).map(s => s.trim());
-      const cand = firstLines.find(s => /^(Practice|Identify|Before|Use|Adopt|Run|Evaluate|Prepare|Activate|Choose|Write|Count)\b/i.test(s));
-      return cand || null;
-    };
-
-    const actionPlanFromAI = extractActionPlan(w.description);
-
-    return {
-      ...w,
-      description: shortExplanation,
-      actionPlan: actionPlanFromAI || generateActionPlanForWeakness(w.title, w.category),
-      opponentContext,
-      example
-    };
-  });
+  sections.recurringWeaknesses = await buildRecurringWeaknessesFinal();
 
   console.log(`✅ Parsed ${sections.recurringWeaknesses.length} weaknesses from enhanced deep analysis`);
   return sections;
+};
+
+// ================= New: Full-game Gemini-driven report (no Stockfish example picking) =================
+export const generateReportFromGeminiFullGames = async (playerInfo, gameContext, options = {}) => {
+  const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+  if (!apiKey || apiKey === 'your_gemini_api_key_here') {
+    throw new Error('Gemini API key not configured. Please add your API key to the .env file.');
+  }
+
+  const { username, platform, averageRating, skillLevel } = playerInfo || {};
+
+  // 1) Load user games from local DB (do not change existing fetch/store flow)
+  const games = await puzzleDataService.getUserGames(username, options.maxGames || 25);
+  if (!Array.isArray(games) || games.length === 0) {
+    throw new Error('No stored user games found for Gemini analysis. Fetch and store games first.');
+  }
+
+  // Also load stored user mistakes to ground examples if needed
+  let userMistakes = [];
+  try {
+    userMistakes = await puzzleDataService.getUserMistakes(username, 500);
+  } catch (e) {
+    console.warn('Could not load user mistakes, will rely on games only:', e?.message);
+  }
+
+  // 2) Build compact payload of all games: meta + key positions already available
+  // We avoid re-running Stockfish; we forward positions, moves, openings, and results
+  const compactGames = games.map((g, idx) => ({
+    gameNumber: idx + 1,
+    gameId: g.gameId || g.url || `game-${idx + 1}`,
+    result: g.result || g.outcome || null,
+    playerColor: g.playerColor || null,
+    player: username,
+    opponent: g.opponent || g.opponentUsername || null,
+    playerRating: g.playerRating || null,
+    opponentRating: g.opponentRating || null,
+    eco: g.eco || g.opening?.eco || null,
+    opening: g.opening?.name || g.openingName || null,
+    pgn: g.pgn || null,
+    moves: g.moves || g.pgn || null,
+    accuracyData: g.accuracyData ? {
+      white: g.accuracyData.white || null,
+      black: g.accuracyData.black || null,
+      analysis: Array.isArray(g.accuracyData.analysis) ? g.accuracyData.analysis.slice(0, 60) : undefined
+    } : undefined,
+    // If you already store key FENs/positions in your pipeline, include them; otherwise Gemini can derive from moves
+    keyPositions: g.keyPositions || undefined
+  }));
+
+  // Helper: parse PGN/moves and build user move index with FENs
+  const buildGameIndex = () => {
+    const index = new Map();
+    for (const cg of compactGames) {
+      const chess = new Chess();
+      let loaded = false;
+      if (cg.pgn) {
+        try { loaded = chess.loadPgn(cg.pgn, { sloppy: true }); } catch {}
+      }
+      if (!loaded && cg.moves && typeof cg.moves === 'string') {
+        // Attempt to treat moves string as SAN tokens
+        chess.reset();
+        const tokens = cg.moves.split(/\s+/).filter(Boolean);
+        for (const tok of tokens) {
+          try { chess.move(tok, { sloppy: true }); } catch { /* ignore parse errors */ }
+        }
+      }
+      // Replay to collect per-halfmove snapshots
+      const replay = new Chess();
+      if (cg.pgn) {
+        try { replay.loadPgn(cg.pgn, { sloppy: true }); } catch {}
+      } else {
+        // If we couldn't load, use history from the previous attempt
+        const h2 = chess.history({ verbose: true });
+        replay.reset();
+        for (const m of h2) replay.move(m, { sloppy: true });
+      }
+      // Now traverse again from start to collect SAN and FEN after each user move
+      const traversal = new Chess();
+      const history = replay.history({ verbose: true });
+      const entries = [];
+      let fullmove = 1;
+      for (const mv of history) {
+        const color = mv.color === 'w' ? 'white' : 'black';
+        traversal.move(mv, { sloppy: true });
+        entries.push({
+          color,
+          fullmove,
+          san: mv.san,
+          fenAfter: traversal.fen(),
+        });
+        if (color === 'black') fullmove += 1; // fullmove increments after black
+      }
+      index.set(cg.gameNumber, {
+        playerColor: cg.playerColor,
+        entries,
+        gameId: cg.gameId,
+      });
+    }
+    return index;
+  };
+
+  const gameIndex = buildGameIndex();
+
+  // 3) Compose strict JSON-only prompt modeled after prompt.txt
+  const safeName = username || 'Player';
+  const skill = skillLevel || 'Unknown';
+  const ratingText = averageRating ? ` (~${averageRating})` : '';
+
+  const prompt = `You are \"Pawnsposes,\" a world-renowned chess Grandmaster (FIDE 2650+) and elite coach.\n` +
+`Your analysis is insightful, practical, and psychological. Base ALL conclusions ONLY on the provided JSON data. Do not invent moves or positions.\n` +
+`Your examples will be validated against the user's actual games; incorrect examples will be discarded.\n\n` +
+`USER CONTEXT: ${safeName} on ${platform || 'unknown'}${ratingText}, Skill: ${skill}.\n\n` +
+`ANALYSIS TASK: Return ONLY valid JSON (no Markdown). Use this schema exactly and fill all fields.\n` +
+`{\n` +
+`  \"recurringWeaknesses\": [\n` +
+`    {\n` +
+`      \"title\": string,\n` +
+`      \"description\": string,\n` +
+`      \"examples\": [\n` +
+`        {\n` +
+`          \"gameNumber\": number,\n` +
+`          \"moveNumber\": number,\n` +
+`          \"played\": string,        // e.g., 15...g5?\n` +
+`          \"fen\": string,\n` +
+`          \"justification\": string, // brief reason why it was wrong\n` +
+`          \"betterPlan\": string,    // concise plan and a better move suggestion\n` +
+`          \"betterMove\": string     // e.g., 15...Re8!\n` +
+`        }\n` +
+`      ]\n` +
+`    }\n` +
+`  ],\n` +
+`  \"engineInsights\": string,\n` +
+`  \"improvementRecommendations\": string\n` +
+`}\n\n` +
+`Guidelines:\n` +
+`- Produce exactly 3 recurringWeaknesses.\n` +
+`- All example moves must be from move 16 or later (moveNumber >= 16). Prefer mid/late-game moments typical for ~1800 level play.\n` +
+`- Use only the provided data (games, moves, FENs if present). If FEN is missing, you may omit it in examples or derive from move context if clearly possible.\n` +
+`- Keep justifications and better plans concise and practical.\n` +
+`- No extra prose outside JSON.\n\n` +
+`GAMES JSON:\n` + JSON.stringify(compactGames);
+
+  // 4) Call Gemini
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.5, topP: 0.9, maxOutputTokens: 4096 }
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end <= start) throw new Error('Gemini returned no JSON');
+
+  let parsed;
+  try {
+    parsed = JSON.parse(text.slice(start, end + 1));
+  } catch (e) {
+    throw new Error('Failed to parse Gemini JSON response');
+  }
+
+  // 5) Ground examples against actual user moves
+  const gameIdToNumber = new Map(compactGames.map(g => [g.gameId, g.gameNumber]));
+  const mistakesByGameNumber = new Map();
+  for (const m of (userMistakes || [])) {
+    const gnum = gameIdToNumber.get(m.gameId);
+    if (!gnum) continue;
+    if (!mistakesByGameNumber.has(gnum)) mistakesByGameNumber.set(gnum, []);
+    mistakesByGameNumber.get(gnum).push(m);
+  }
+
+  const getUserMoveAt = (gnum, moveNumber) => {
+    const gi = gameIndex.get(gnum);
+    if (!gi || !gi.playerColor) return null;
+    const entry = gi.entries.find(e => e.fullmove === Number(moveNumber) && e.color === gi.playerColor);
+    return entry || null;
+  };
+
+  const groundExamples = (w) => {
+    const raw = Array.isArray(w.examples) ? w.examples : [];
+    const filtered = raw.filter(ex => Number(ex?.moveNumber) >= 16);
+    const src = filtered.length ? filtered : raw;
+    const out = [];
+
+    for (const ex of src) {
+      const gnum = Number(ex?.gameNumber);
+      const mv = Number(ex?.moveNumber);
+      if (!gnum || !mv) continue;
+      const userMove = getUserMoveAt(gnum, mv);
+      if (userMove) {
+        out.push({
+          gameNumber: gnum,
+          moveNumber: mv,
+          played: userMove.san, // enforce real played SAN
+          fen: ex.fen || userMove.fenAfter,
+          justification: ex.justification || '',
+          betterPlan: ex.betterPlan || '',
+          betterMove: ex.betterMove || ''
+        });
+        continue;
+      }
+      // Fallback to stored mistakes from the same game
+      const mistakes = mistakesByGameNumber.get(gnum) || [];
+      const m = mistakes.find(mm => Number(mm.moveNumber) >= 16);
+      if (m) {
+        out.push({
+          gameNumber: gnum,
+          moveNumber: m.moveNumber,
+          played: m.playerMove,
+          fen: m.fen,
+          justification: w.description ? w.description.slice(0, 120) : 'From user mistake record',
+          betterPlan: '',
+          betterMove: m.correctMove
+        });
+      }
+    }
+
+    // If we still have no valid examples, synthesize 1-2 from mistakes across games
+    if (out.length === 0) {
+      for (const [gnum, arr] of mistakesByGameNumber.entries()) {
+        const m = arr.find(mm => Number(mm.moveNumber) >= 16);
+        if (!m) continue;
+        out.push({
+          gameNumber: gnum,
+          moveNumber: m.moveNumber,
+          played: m.playerMove,
+          fen: m.fen,
+          justification: 'From user mistake record',
+          betterPlan: '',
+          betterMove: m.correctMove
+        });
+        if (out.length >= 2) break;
+      }
+    }
+
+    // Ensure uniqueness by game:move
+    const seen = new Set();
+    const uniq = out.filter(ex => {
+      const key = `${ex.gameNumber}:${ex.moveNumber}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    return uniq.slice(0, 3);
+  };
+
+  // 6) Map parsed JSON to your existing UI contract, using grounded examples
+  const recurringWeaknesses = Array.isArray(parsed.recurringWeaknesses) ? parsed.recurringWeaknesses.slice(0, 3) : [];
+
+  const recurringWeaknessesSection = recurringWeaknesses.map((w) => {
+    const grounded = groundExamples(w);
+    const top = grounded[0];
+    return ({
+      title: w.title || 'Weakness',
+      description: w.description || '',
+      category: categorizeWeaknessByContent(w.description || w.title || ''),
+      opponentContext: null,
+      example: top ? `Mistake: ${top.played || ''} (${top.justification || ''})\nBetter Plan: ${top.betterMove || ''} (${top.betterPlan || ''})` : null,
+      examples: grounded.map(ex => ({
+        gameNumber: ex.gameNumber,
+        moveNumber: ex.moveNumber,
+        played: ex.played,
+        fen: ex.fen,
+        justification: ex.justification,
+        betterPlan: ex.betterPlan,
+        betterMove: ex.betterMove
+      })),
+      actionPlan: generateActionPlanForWeakness(w.title, categorizeWeaknessByContent(w.description || w.title || ''))
+    });
+  });
+
+  const result = {
+    geminiFullReport: {
+      raw: parsed,
+      recurringWeaknessesSection,
+      engineInsights: parsed.engineInsights || '',
+      improvementRecommendations: parsed.improvementRecommendations || ''
+    }
+  };
+
+  return result;
+};
+
+// Convenience: return sections object that matches existing UI expectations
+export const generateFullReportSectionsFromGames = async (playerInfo, gameContext, options = {}) => {
+  const full = await generateReportFromGeminiFullGames(playerInfo, gameContext, options);
+  const rw = full.geminiFullReport.recurringWeaknessesSection || [];
+  return {
+    recurringWeaknesses: rw,
+    engineInsights: full.geminiFullReport.engineInsights,
+    improvementRecommendations: full.geminiFullReport.improvementRecommendations
+  };
 };
 
 // Helper functions for parsing
@@ -1196,20 +1788,34 @@ const getOpponentNameFromGameInfo = (gameInfo, userColor) => {
 // Compute accurate displayed move number from FEN and turn
 const computeDisplayedMoveNumber = (mistakeOrPosition) => {
   try {
-    const fen = mistakeOrPosition?.previousFen || mistakeOrPosition?.position?.previousFen || mistakeOrPosition?.fen || mistakeOrPosition?.position?.fen;
+    const prevFen = mistakeOrPosition?.previousFen || mistakeOrPosition?.position?.previousFen;
+    const currFen = mistakeOrPosition?.fen || mistakeOrPosition?.position?.fen;
     const turn = mistakeOrPosition?.turn || mistakeOrPosition?.position?.turn;
-    if (fen) {
-      const parts = fen.split(' ');
+    const parseFullmove = (fen) => {
+      const parts = (fen || '').split(' ');
       if (parts.length >= 6) {
-        const fullmove = parseInt(parts[5], 10);
-        const toMove = turn || parts[1];
-        if (!isNaN(fullmove)) {
-          // Use previous FEN fullmove as the move just played
-          return fullmove;
-        }
+        const n = parseInt(parts[5], 10);
+        return isNaN(n) ? null : n;
       }
+      return null;
+    };
+
+    // Preferred: use previous position's fullmove (represents the move being played)
+    const prevFull = parseFullmove(prevFen);
+    if (prevFull != null) return prevFull;
+
+    // Fallback: derive from current FEN and side to move
+    const currFull = parseFullmove(currFen);
+    if (currFull != null) {
+      const toMove = turn || (currFen ? currFen.split(' ')[1] : null);
+      if (toMove === 'white') return Math.max(1, currFull - 1); // black just moved
+      if (toMove === 'black') return currFull; // white just moved
+      return currFull;
     }
-    return mistakeOrPosition?.moveNumber || mistakeOrPosition?.position?.moveNumber || null;
+
+    // Final fallback: stored moveNumber
+    const mv = mistakeOrPosition?.moveNumber ?? mistakeOrPosition?.position?.moveNumber ?? null;
+    return mv ?? null;
   } catch {
     return mistakeOrPosition?.moveNumber || mistakeOrPosition?.position?.moveNumber || null;
   }
@@ -1246,6 +1852,11 @@ const formatBestMoveSAN = (mistake) => {
 
 // Enhanced main function for deep Stockfish + Gemini analysis
 export const performDeepStockfishGeminiAnalysis = async (keyPositions, playerInfo, gameContext, options = {}) => {
+  return legacyPerformDeepStockfishGeminiAnalysis(keyPositions, playerInfo, gameContext, options);
+};
+
+// Legacy kept for backwards compatibility; the original implementation moved below under this alias
+const legacyPerformDeepStockfishGeminiAnalysis = async (keyPositions, playerInfo, gameContext, options = {}) => {
   const {
     maxPositions = 15,
     analysisDepth = 20, // Increased default depth for production-level analysis
@@ -1282,6 +1893,7 @@ export const performDeepStockfishGeminiAnalysis = async (keyPositions, playerInf
       timeLimit: timePerPosition,
       maxPositions,
       prioritizeKeyPositions,
+      concurrency: 2, // Light concurrency: two engine workers
       onProgress: (progress) => {
         onProgress({
           stage: 'deep_analyzing',

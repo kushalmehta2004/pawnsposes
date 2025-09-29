@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 
-const LoadingScreen = ({ progressPercent = 0, currentStep = 0, stockfishProgress = '' }) => {
+const LoadingScreen = ({ progressPercent = 0, currentStep = 0 }) => {
   const [animatedStep, setAnimatedStep] = useState(currentStep);
   const steps = [
     'Fetching & filtering game data...',
     'Analyzing mistakes & patterns...',
     'Validating FENs & selecting key positions...',
-    'Running Stockfish engine analysis...',
     'Generating AI explanations...',
     'Finalizing your comprehensive report!'
   ];
@@ -305,11 +304,6 @@ const LoadingScreen = ({ progressPercent = 0, currentStep = 0, stockfishProgress
               >
                 <span className="status-icon"></span>
                 {step}
-                {index === 2 && stepClass === 'active' && stockfishProgress && (
-                  <div style={{ fontSize: '12px', color: '#666', marginTop: '4px', marginLeft: '20px' }}>
-                    {stockfishProgress}
-                  </div>
-                )}
               </motion.li>
             );
           })}

@@ -740,8 +740,8 @@ EXPLANATION STYLE: Use precise chess terminology. Include deep strategic and tac
           formData.username,
           {
             maxGames: fetchedGames.length,
-            analysisDepth: 18, // Good balance of speed vs accuracy
-            timeLimit: 1200, // 2 seconds per position
+            analysisDepth: 16, // Slightly lower depth for speed while retaining quality
+            timeLimit: 800, // ~0.8s per position for faster pass
             onProgress: (progress) => {
               const progressPercent = 42 + (progress.progress * 0.08); // 42% to 50%
               setProgressPercent(progressPercent);
@@ -810,85 +810,21 @@ EXPLANATION STYLE: Use precise chess terminology. Include deep strategic and tac
       
 
       
-      // STAGE 4: Stockfish Engine Analysis (60% - 80%)
-      setProgressStage('stockfish');
+      // STAGE 4: AI Analysis (60% - 100%)
+      setProgressStage('analyzing');
       setProgressPercent(60);
       
       // Show step 3 for at least 1 second
       await delayedStepUpdate(3, 1000);
       
 
-      
-      // Perform enhanced deep Stockfish analysis on key positions
-      let stockfishResults = null;
       try {
-        // Collect KEY positions from all games (from Step 2 position analysis)
-        const allKeyPositions = allGamesFenData.flatMap((gameData, gameIndex) => 
-          gameData.keyPositions.map(pos => ({
-            ...pos,
-            gameNumber: gameIndex + 1,
-            gameInfo: gameData.gameData
-          }))
-        );
+        setProgressPercent(80);
         
+        // Show step 4 for at least 1 second
+        await delayedStepUpdate(4, 1000);
+        const analysisResult = await performChessAnalysisWithGemini(allGamesFenData, fetchedGames, formData);
 
-        
-        // Estimate player skill for context
-        const playerSkill = estimatePlayerSkill(fetchedGames, formData.username, formData.platform);
-        
-        const playerInfo = {
-          username: formData.username,
-          skillLevel: playerSkill.skillLevel,
-          averageRating: playerSkill.averageRating,
-          platform: formData.platform
-        };
-        
-        const gameContext = {
-          totalGames: fetchedGames.length,
-          platform: formData.platform
-        };
-        
-        // Use enhanced deep analysis function
-        stockfishResults = await performDeepStockfishGeminiAnalysis(
-          allKeyPositions,
-          playerInfo,
-          gameContext,
-          {
-            maxPositions: Math.min(allKeyPositions.length, 20), // Limit to 20 key positions for deep analysis
-            analysisDepth: 20, // Deep analysis with 20-move depth
-            timePerPosition: 4000, // More time for deeper analysis
-            prioritizeKeyPositions: true,
-            onProgress: (progress) => {
-              const message = progress.message || `Deep analysis: ${progress.stage || 'processing'}`;
-              setStockfishProgress(message);
-              if (progress.progress) {
-                setProgressPercent(60 + (progress.progress * 0.2)); // 60% to 80%
-              }
-            }
-          }
-        );
-        
-      } catch (stockfishError) {
-        console.warn('❌ Deep analysis failed:', stockfishError.message);
-        stockfishResults = null;
-      }
-      
-      // STAGE 5: AI Analysis (80% - 100%)
-      setProgressStage('analyzing');
-      setProgressPercent(80);
-      
-      // Show step 4 for at least 1 second
-      await delayedStepUpdate(4, 1000);
-      
-
-      
-      try {
-        setProgressPercent(90);
-        
-        // Show step 5 for at least 1 second
-        await delayedStepUpdate(5, 1000);
-        const analysisResult = await performChessAnalysisWithGemini(allGamesFenData, fetchedGames, formData, stockfishResults);
-        
         // Add games data and FEN positions to the analysis result
         const completeAnalysisResult = {
           ...analysisResult,
@@ -928,25 +864,138 @@ EXPLANATION STYLE: Use precise chess terminology. Include deep strategic and tac
     }
   };
 
-  // ✅ UNIFIED: Single comprehensive Gemini analysis function with optional Stockfish integration
-  const performChessAnalysisWithGemini = async (fenData, games, formData, stockfishResults = null) => {
+  // ✅ NEW: Analyze recurring weaknesses with FEN data using JSON format
+  const analyzeRecurringWeaknessesWithGemini = async (fenData, games, formData) => {
+    console.log('🚀 Analyzing recurring weaknesses with FEN data...');
+    
+    try {
+      // Prepare FEN data with metadata
+      const preparedFenData = prepareFenDataForRecurringWeaknessAnalysis(games, fenData, formData);
+      
+      // Create the Pawnsposes prompt for recurring weaknesses
+      const prompt = createRecurringWeaknessPrompt(preparedFenData, formData);
+      
+      // Call Gemini API
+      const result = await callGeminiForRecurringWeaknesses(prompt);
+      
+      console.log('✅ Recurring weaknesses analysis completed');
+      return result;
+      
+    } catch (error) {
+      console.error('Error in recurring weaknesses analysis:', error);
+      throw error;
+    }
+  };
+
+
+  // ✅ UNIFIED: Single comprehensive Gemini analysis function
+  const performChessAnalysisWithGemini = async (fenData, games, formData) => {
     console.log('🚀 Performing UNIFIED comprehensive chess analysis with single Gemini call...');
     
     try {
       // Prepare the games data for comprehensive analysis
       const gamesForAnalysis = prepareGamesForGeminiAnalysis(games, fenData, formData);
       
-      // ✅ SINGLE CALL: Get all analysis types in one request (with optional Stockfish data)
-      const comprehensiveResult = await callUnifiedGeminiAPI(gamesForAnalysis, formData, stockfishResults);
+      // ✅ SINGLE CALL: Get all analysis types in one request
+      const comprehensiveResult = await callUnifiedGeminiAPI(gamesForAnalysis, formData);
       
+            
+      // ✅ NEW: Add recurring weaknesses analysis with FEN data
+      try {
+        const recurringWeaknessesResult = await analyzeRecurringWeaknessesWithGemini(fenData, games, formData);
+        comprehensiveResult.recurringWeaknesses = recurringWeaknessesResult.weaknesses || [];
+        console.log('✅ Enhanced with FEN-based recurring weaknesses:', comprehensiveResult.recurringWeaknesses.length);
+      } catch (weaknessError) {
+        console.warn('⚠️ Recurring weaknesses analysis failed, using fallback:', weaknessError.message);
+        // Keep existing weaknesses from unified analysis as fallback
+      }
+
       console.log('✅ Complete unified analysis result:', comprehensiveResult);
       return comprehensiveResult;
+     
+   } catch (error) {
+     console.error('Error in unified Gemini analysis:', error);
+     throw error;
+   }
+     };
+
+  // ✅ NEW: Prepare FEN data with game metadata for recurring weaknesses analysis
+  const prepareFenDataForRecurringWeaknessAnalysis = (games, fenData, formData) => {
+    console.log('🔍 Preparing FEN data with metadata for recurring weakness analysis...');
+    
+    const preparedData = games.map((game, index) => {
+      const gameNumber = index + 1;
+      const fenPositions = fenData[index]?.fenPositions || [];
       
-    } catch (error) {
-      console.error('Error in unified Gemini analysis:', error);
-      throw error;
-    }
-  };
+      // Extract game metadata
+      let gameInfo = {};
+      if (formData.platform === 'chess.com') {
+        gameInfo = {
+          white: game.white?.username || 'Unknown',
+          black: game.black?.username || 'Unknown',
+          whiteRating: game.white?.rating || 0,
+          blackRating: game.black?.rating || 0,
+          result: game.white?.result === 'win' ? '1-0' : 
+                  game.black?.result === 'win' ? '0-1' : 
+                  game.white?.result === 'draw' ? '1/2-1/2' : 'Unknown',
+          eco: game.eco || 'Unknown',
+          timeControl: game.time_control || 'Unknown'
+        };
+      } else if (formData.platform === 'lichess') {
+        gameInfo = {
+          white: game.players?.white?.user?.name || 'Unknown',
+          black: game.players?.black?.user?.name || 'Unknown',
+          whiteRating: game.players?.white?.rating || 0,
+          blackRating: game.players?.black?.rating || 0,
+          result: game.winner === 'white' ? '1-0' : 
+                  game.winner === 'black' ? '0-1' : 
+                  !game.winner ? '1/2-1/2' : 'Unknown',
+          eco: game.opening?.eco || 'Unknown',
+          timeControl: game.speed || 'Unknown'
+        };
+      }
+
+      // Determine user's color and opponent
+      const isUserWhite = gameInfo.white === formData.username;
+      const userColor = isUserWhite ? 'white' : 'black';
+      const opponent = isUserWhite ? gameInfo.black : gameInfo.white;
+      const userRating = isUserWhite ? gameInfo.whiteRating : gameInfo.blackRating;
+      const opponentRating = isUserWhite ? gameInfo.blackRating : gameInfo.whiteRating;
+
+      // Process FEN positions with metadata
+      const processedPositions = fenPositions.map((position, posIndex) => {
+        // Determine game phase
+        let phase = 'opening';
+        if (position.moveNumber > 15) phase = 'middlegame';
+        if (position.moveNumber > 40) phase = 'endgame';
+
+        return {
+          gameNumber,
+          moveNumber: position.moveNumber,
+          fen: position.fen,
+          move: position.move,
+          phase,
+          userColor,
+          opponent,
+          userRating,
+          opponentRating,
+          result: gameInfo.result,
+          eco: gameInfo.eco,
+          timeControl: gameInfo.timeControl
+        };
+      });
+
+      return {
+        gameNumber,
+        gameInfo,
+        userColor,
+        opponent,
+        positions: processedPositions
+      };
+    });
+
+    return preparedData;
+ };
 
   // ✅ ENHANCED: Prepare games with context-aware analysis
   const prepareGamesForGeminiAnalysis = (games, fenData, formData) => {
@@ -2516,6 +2565,9 @@ Keep examples concise and actionable.
             width: 100%;
             min-width: auto;
             flex: none;
+            /* Stack input and button on small screens */
+            flex-direction: column;
+            align-items: stretch;
           }
           
           .username-input,
@@ -2716,14 +2768,8 @@ Keep examples concise and actionable.
 };
 
 // ✅ UNIFIED: Single comprehensive Gemini API call that does everything (with optional Stockfish integration)
-const callUnifiedGeminiAPI = async (gamesData, formData, stockfishResults = null) => {
+const callUnifiedGeminiAPI = async (gamesData, formData) => {
   console.log('Starting UNIFIED Gemini analysis - Single call for all analysis types');
-  
-  if (stockfishResults) {
-    console.log('Integrating Stockfish engine analysis results');
-    console.log(`   - ${stockfishResults.stockfishAnalysis?.totalMistakesFound || 0} mistakes detected`);
-    console.log(`   - ${stockfishResults.stockfishAnalysis?.totalPositionsAnalyzed || 0} positions analyzed`);
-  }
   
   const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
   
@@ -2740,8 +2786,8 @@ const callUnifiedGeminiAPI = async (gamesData, formData, stockfishResults = null
   console.log(`   Correct Win Rate: ${correctWinRate}%`);
   console.log(`   Correct Accuracy: ${correctAccuracy}%`);
   
-  // Create comprehensive prompt that combines all analysis types (with optional Stockfish data)
-  const unifiedPrompt = await createUnifiedAnalysisPrompt(gamesData, formData, stockfishResults);
+  // Create comprehensive prompt that combines all analysis types
+  const unifiedPrompt = await createUnifiedAnalysisPrompt(gamesData, formData);
   
 
   console.log('🎯 Sending single comprehensive request to Gemini...');
@@ -2793,8 +2839,8 @@ const callUnifiedGeminiAPI = async (gamesData, formData, stockfishResults = null
     calculatedWinRate: correctWinRate,
     calculatedAccuracy: finalAccuracy,
     geminiCalculatedAccuracy: parsedResult.calculatedAccuracy, // Store Gemini's calculation separately
-    basicCalculatedAccuracy: correctAccuracy, // Store basic calculation for comparison
-    stockfishAnalysis: stockfishResults // Include Stockfish results if available
+    basicCalculatedAccuracy: correctAccuracy // Store basic calculation for comparison
+    
   };
   
   console.log(`🎯 ACCURACY COMPARISON:`);
@@ -4838,5 +4884,190 @@ const parseWeaknessesFromUnified = (weaknessesText) => {
 };
 
 // Removed unused helper functions: calculateBasicWinRate and calculateBasicAccuracy
+
+// ? NEW: Create Pawnsposes prompt for recurring weaknesses analysis
+const createRecurringWeaknessPrompt = (preparedFenData, formData) => {
+  const { username, platform } = formData;
+  
+  // Flatten all positions from all games
+  const allPositions = preparedFenData.flatMap(game => game.positions);
+  
+  // Sample positions for analysis (limit to avoid token limits)
+  const samplePositions = allPositions.slice(0, 50);
+  
+  // Create game summaries
+  const gameSummaries = preparedFenData.map(game => {
+    return `Game ${game.gameNumber}: ${username} (${game.userColor}) vs. ${game.opponent}
+Result: ${game.gameInfo.result} | ECO: ${game.gameInfo.eco} | Time Control: ${game.gameInfo.timeControl}
+Positions analyzed: ${game.positions.length}`;
+  }).join('\n');
+
+  // Create position data for analysis
+  const positionData = samplePositions.map(pos => {
+    return `Game ${pos.gameNumber}, Move ${pos.moveNumber} (${pos.phase}): ${pos.move}
+FEN: ${pos.fen}
+Context: ${username} playing as ${pos.userColor} vs. ${pos.opponent} (${pos.userRating} vs ${pos.opponentRating})`;
+  }).join('\n\n');
+
+  return `You are "Pawnsposes," a world-renowned chess Grandmaster (FIDE 2650+) and elite coach. You are insightful, practical, and psychologically aware. Your style is encouraging but direct.
+
+CRITICAL INSTRUCTIONS:
+1. Analyze ONLY the provided FEN positions and metadata
+2. Do NOT invent positions or evaluations
+3. Base ALL conclusions on the actual data provided
+4. Return results in STRICT JSON format only (no Markdown, no extra text)
+5. Output exactly 3 recurring weaknesses
+
+PLAYER DATA:
+Username: ${username}
+Platform: ${platform}
+Games analyzed: ${preparedFenData.length}
+
+GAME SUMMARIES:
+${gameSummaries}
+
+POSITION DATA FOR ANALYSIS:
+${positionData}
+
+ANALYSIS REQUIREMENTS:
+Analyze the FEN positions and moves to identify exactly 3 recurring weaknesses. Each weakness must include:
+
+1. Short descriptive title (from standard positional/strategic chess concepts)
+2. Explanation of why this is a recurring weakness (long-term consequences, not just tactical blunders)
+3. One concrete example from the games:
+   - Game number
+   - Move number
+   - Move played (e.g., "15...g5?")
+   - Corresponding FEN string
+   - Short explanation of why this move/decision was strategically wrong
+   - What should have been played instead
+4. Better Plan: Superior plan for the example, with possible long-term ideas
+
+DIVERSITY REQUIREMENTS:
+- Use examples from 3 DIFFERENT games
+- Vary the colors (don't use all white or all black examples)
+- Vary the move numbers and positions
+- Ensure each weakness represents a different strategic concept
+
+OUTPUT FORMAT:
+Return ONLY valid JSON in this exact structure:
+
+{
+  "weaknesses": [
+    {
+      "title": "Strategic Concept Name",
+      "explanation": "Why this is a recurring weakness with long-term consequences...",
+      "example": {
+        "gameNumber": 1,
+        "moveNumber": 15,
+        "move": "15...g5?",
+        "fen": "rnbqkb1r/pppp1ppp/5n2/4p3/2B1P3/3P1N2/PPP2PPP/RNBQK2R b KQkq - 0 4",
+        "explanation": "This move weakens the kingside and allows tactical opportunities...",
+        "betterMove": "15...Be7 or 15...Bd6"
+      },
+      "betterPlan": "Superior strategic approach with long-term ideas..."
+    },
+    {
+      "title": "Different Strategic Concept",
+      "explanation": "Different recurring weakness explanation...",
+      "example": {
+        "gameNumber": 3,
+        "moveNumber": 22,
+        "move": "22.Bxf6?",
+        "fen": "r1bq1rk1/ppp2ppp/2n2n2/2b1p3/2B1P3/3P1N2/PPP2PPP/RNBQR1K1 w - - 0 9",
+        "explanation": "Trading the good bishop for knight without compensation...",
+        "betterMove": "22.Be3 or 22.Bb3"
+      },
+      "betterPlan": "Different strategic approach..."
+    },
+    {
+      "title": "Third Strategic Concept",
+      "explanation": "Third recurring weakness explanation...",
+      "example": {
+        "gameNumber": 5,
+        "moveNumber": 8,
+        "move": "8...h6?",
+        "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+        "explanation": "Premature pawn advance creating weaknesses...",
+        "betterMove": "8...Nf6 or 8...d6"
+      },
+      "betterPlan": "Third strategic approach..."
+    }
+  ]
+}
+
+IMPORTANT: Return ONLY the JSON object above. No additional text, explanations, or formatting.`;
+};
+
+// ? NEW: Call Gemini API for recurring weaknesses analysis
+const callGeminiForRecurringWeaknesses = async (prompt) => {
+  const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+  
+  if (!apiKey) {
+    throw new Error('Gemini API key not configured');
+  }
+
+  const model = 'gemini-2.0-flash-exp';
+  
+  try {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{
+            text: prompt
+          }]
+        }],
+        generationConfig: {
+          temperature: 0.7,
+          topK: 40,
+          topP: 0.95,
+          maxOutputTokens: 2048,
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
+    }
+
+    const result = await response.json();
+    
+    if (!result.candidates || !result.candidates[0] || !result.candidates[0].content) {
+      throw new Error('Invalid response structure from Gemini API');
+    }
+
+    const analysisText = result.candidates[0].content.parts[0].text;
+    
+    // Parse JSON response
+    try {
+      const jsonMatch = analysisText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('No JSON found in response');
+      }
+      
+      const jsonResult = JSON.parse(jsonMatch[0]);
+      
+      if (!jsonResult.weaknesses || !Array.isArray(jsonResult.weaknesses)) {
+        throw new Error('Invalid JSON structure - missing weaknesses array');
+      }
+      
+      return jsonResult;
+      
+    } catch (parseError) {
+      console.error('Failed to parse JSON response:', parseError);
+      console.error('Raw response:', analysisText);
+      throw new Error('Failed to parse JSON response from Gemini');
+    }
+    
+  } catch (error) {
+    console.error('Error calling Gemini API for recurring weaknesses:', error);
+    throw error;
+  }
+};
 
 export default Reports;

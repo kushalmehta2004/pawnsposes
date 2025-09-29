@@ -19,6 +19,7 @@ const durationToSeconds = (iso) => {
   return h * 3600 + mi * 60 + s;
 };
 
+// Base search with robust filtering
 export const searchFirstYouTubeVideo = async (query) => {
   try {
     const key = process.env.REACT_APP_YOUTUBE_API_KEY;
@@ -57,10 +58,11 @@ export const searchFirstYouTubeVideo = async (query) => {
             const durationSec = durationToSeconds(v?.contentDetails?.duration);
             const viewCount = parseInt(v?.statistics?.viewCount || '0', 10);
             const live = (v?.snippet?.liveBroadcastContent || 'none') !== 'none';
-            const shortsLike = /#shorts|shorts/i.test(title) || durationSec > 0 && durationSec < 120;
+            const shortsLike = /#shorts|shorts/i.test(title) || (durationSec > 0 && durationSec < 120);
             const embeddable = v?.status?.embeddable !== false; // default true if not present
             const url = v?.id ? `https://www.youtube.com/watch?v=${v.id}` : null;
-            return { v, title, description, durationSec, viewCount, live, shortsLike, embeddable, url };
+            const channelTitle = v?.snippet?.channelTitle || '';
+            return { v, title, description, durationSec, viewCount, live, shortsLike, embeddable, url, channelTitle };
           })
           .filter((x) => x.url && !x.live && !x.shortsLike && x.embeddable && x.durationSec >= 120)
           .filter((x) => x.viewCount >= 10000); // reputation threshold
@@ -74,10 +76,11 @@ export const searchFirstYouTubeVideo = async (query) => {
               const durationSec = durationToSeconds(v?.contentDetails?.duration);
               const viewCount = parseInt(v?.statistics?.viewCount || '0', 10);
               const live = (v?.snippet?.liveBroadcastContent || 'none') !== 'none';
-              const shortsLike = /#shorts|shorts/i.test(title) || durationSec > 0 && durationSec < 60;
+              const shortsLike = /#shorts|shorts/i.test(title) || (durationSec > 0 && durationSec < 60);
               const embeddable = v?.status?.embeddable !== false;
               const url = v?.id ? `https://www.youtube.com/watch?v=${v.id}` : null;
-              return { v, title, description, durationSec, viewCount, live, shortsLike, embeddable, url };
+              const channelTitle = v?.snippet?.channelTitle || '';
+              return { v, title, description, durationSec, viewCount, live, shortsLike, embeddable, url, channelTitle };
             })
             .filter((x) => x.url && !x.live && !x.shortsLike && x.embeddable && x.durationSec >= 60)
             .filter((x) => x.viewCount >= 1000);
@@ -133,4 +136,123 @@ export const searchFirstYouTubeVideo = async (query) => {
     console.warn('searchFirstYouTubeVideo failed:', e.message);
     return null;
   }
+};
+
+// Build targeted queries from weakness title and prioritize reputable channels
+export const searchBestYouTubeForWeakness = async (weaknessTitleRaw) => {
+  const key = process.env.REACT_APP_YOUTUBE_API_KEY;
+  if (!key || key === 'your_youtube_api_key_here') {
+    console.warn('REACT_APP_YOUTUBE_API_KEY is missing');
+    return null;
+  }
+
+  const preferredChannels = new Set([
+    'GothamChess',
+    'agadmator',
+    'Saint Louis Chess Club',
+    'ChessNetwork',
+    'Chess.com',
+    'Hanging Pawns',
+    'Eric Rosen',
+    'thechesswebsite',
+    'NM Robert Ramirez',
+    'GM Igor Smirnov',
+    'Chess Vibes',
+  ]);
+
+  const normalize = (s) => (s || '').toString().replace(/weakness\s*:\s*/i, '').trim();
+  const base = normalize(weaknessTitleRaw);
+  const topic = base.toLowerCase();
+
+  const openings = ['sicilian', 'caro', 'caro-kann', 'french', 'ruy', 'lopez', "queen's gambit", 'queens gambit', "king's indian", 'kings indian', 'scandinavian', 'nimzo', 'grunfeld', 'benoni', 'pirc', 'alekhine'];
+  const tactics = ['fork', 'pin', 'skewer', 'discovered attack', 'double attack', 'x-ray', 'zwischenzug', 'back rank', 'removal of the defender', 'overload'];
+  const endgames = ['rook endgame', 'king and pawn', 'opposition', 'triangulation', 'zugzwang', 'minor piece endgame'];
+
+  const q = [];
+  q.push(`${base} chess`);
+  q.push(`${base} chess lesson`);
+  q.push(`how to ${base} in chess`);
+  q.push(`${base} explained chess`);
+
+  if (openings.some((o) => topic.includes(o))) {
+    q.push(`${base} explained`);
+    q.push(`${base} basics`);
+    q.push(`${base} traps`);
+  }
+  if (tactics.some((t) => topic.includes(t))) {
+    const tword = tactics.find((t) => topic.includes(t));
+    q.push(`${tword} tactics chess`);
+    q.push(`${tword} in chess explained`);
+  }
+  if (endgames.some((e) => topic.includes(e))) {
+    const eword = endgames.find((e) => topic.includes(e));
+    q.push(`${eword} chess basics`);
+    q.push(`${eword} essential principles chess`);
+  }
+
+  // De-duplicate queries while preserving order
+  const queries = Array.from(new Set(q));
+
+  const buildSearchUrl = (qq) =>
+    `https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=10&type=video&videoEmbeddable=true&relevanceLanguage=en&safeSearch=moderate&order=relevance&videoSyndicated=true&q=${encodeURIComponent(
+      qq
+    )}&key=${key}`;
+
+  const buildVideosUrl = (ids) =>
+    `https://www.googleapis.com/youtube/v3/videos?part=contentDetails,statistics,snippet,status&id=${ids}&key=${key}`;
+
+  // Accumulate candidate videos from all queries
+  const byId = new Map();
+  for (const qq of queries) {
+    try {
+      const data = await fetchJson(buildSearchUrl(qq));
+      const items = Array.isArray(data?.items) ? data.items : [];
+      const videoIds = items.map((it) => it?.id?.videoId).filter(Boolean);
+      if (videoIds.length === 0) continue;
+      const details = await fetchJson(buildVideosUrl(videoIds.join(',')));
+      const videos = Array.isArray(details?.items) ? details.items : [];
+      for (const v of videos) {
+        const id = v?.id;
+        if (!id || byId.has(id)) continue;
+        const title = v?.snippet?.title || '';
+        const description = v?.snippet?.description || '';
+        const durationSec = durationToSeconds(v?.contentDetails?.duration);
+        const viewCount = parseInt(v?.statistics?.viewCount || '0', 10);
+        const live = (v?.snippet?.liveBroadcastContent || 'none') !== 'none';
+        const shortsLike = /#shorts|shorts/i.test(title) || (durationSec > 0 && durationSec < 120);
+        const embeddable = v?.status?.embeddable !== false;
+        const url = `https://www.youtube.com/watch?v=${id}`;
+        const channelTitle = v?.snippet?.channelTitle || '';
+        const publishedAt = new Date(v?.snippet?.publishedAt || 0).getTime();
+        byId.set(id, { id, title, description, durationSec, viewCount, live, shortsLike, embeddable, url, channelTitle, publishedAt });
+      }
+    } catch (_) {
+      // ignore this query and continue
+    }
+  }
+
+  const all = Array.from(byId.values())
+    .filter((x) => x.url && !x.live && !x.shortsLike && x.embeddable && x.durationSec >= 120)
+    .filter((x) => x.viewCount >= 5000); // slightly relaxed to broaden pool
+
+  if (all.length === 0) return null;
+
+  // Rank with channel preference and textual relevance
+  const ranked = all
+    .map((x) => ({
+      ...x,
+      score:
+        // text relevance across all query words
+        queries.join(' ').toLowerCase().split(/\s+/).filter(Boolean).reduce(
+          (acc, w) => acc + (x.title.toLowerCase().includes(w) ? 2 : x.description.toLowerCase().includes(w) ? 1 : 0),
+          0
+        ) +
+        Math.log10(x.viewCount + 1) +
+        (x.durationSec >= 300 && x.durationSec <= 2400 ? 0.5 : 0) +
+        (preferredChannels.has(x.channelTitle) ? 3 : 0),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const best = ranked[0];
+  return best ? { title: best.title, url: best.url } : null;
 };

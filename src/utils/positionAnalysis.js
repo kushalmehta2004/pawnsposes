@@ -44,7 +44,7 @@ export const extractFenFromPgn = (pgnString, gameInfo = {}, gameIndex = 0) => {
       chess.move(move.san);
       
       const moveNumber = Math.floor(index / 2) + 1;
-      const turn = index % 2 === 0 ? 'white' : 'black';
+      const turn = index % 2 === 0 ? 'black' : 'white'; // after applying a move, the opposite side is to move
       const phase = determineGamePhase(moveNumber, chess.fen());
       
       fenPositions.push({
@@ -111,7 +111,7 @@ export const extractFenFromLichessMoves = (moves, gameInfo = {}, gameIndex = 0) 
         try {
           const moveObj = chess.move(move.trim());
           const moveNumber = Math.floor(index / 2) + 1;
-          const turn = index % 2 === 0 ? 'white' : 'black';
+          const turn = index % 2 === 0 ? 'black' : 'white'; // after applying a move, the opposite side is to move
           const phase = determineGamePhase(moveNumber, chess.fen());
           
           fenPositions.push({

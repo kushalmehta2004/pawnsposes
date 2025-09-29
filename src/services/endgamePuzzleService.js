@@ -103,7 +103,7 @@ function toAppPuzzle(row, index = 0) {
 
 export default {
   // Load endgame sets using manifest and priority themes
-  async getEndgamePuzzles(maxPuzzles = 10) {
+  async getEndgamePuzzles(maxPuzzles = 10, difficulty = 'easy') {
     const manifest = await fetchManifest();
     const priorities = [
       'rook-endgame',
@@ -128,8 +128,22 @@ export default {
 
     const batches = await Promise.all(selected.map(e => fetchEndgameSet(e.key)));
     const rows = batches.flat();
-    rows.sort(() => Math.random() - 0.5);
-    const take = rows.slice(0, maxPuzzles);
-    return take.map((r, i) => toAppPuzzle(r, i));
+
+    // Filter by difficulty based on rating
+    const ratingRanges = {
+      easy: { min: 2000, max: 2300 },
+      medium: { min: 2300, max: 2700 },
+      hard: { min: 2700, max: Infinity }
+    };
+    const range = ratingRanges[difficulty] || ratingRanges.easy;
+    const filtered = rows.filter(r => {
+      const rVal = parseInt(r.Rating || r.rating || '0', 10);
+      return rVal >= range.min && rVal <= range.max;
+    });
+
+    const pool = filtered.length ? filtered : rows; // fallback to all if no matches
+    pool.sort(() => Math.random() - 0.5);
+    const take = pool.slice(0, maxPuzzles).map((r, i) => toAppPuzzle(r, i)).map(p => ({ ...p, difficulty }));
+    return take;
   }
 };

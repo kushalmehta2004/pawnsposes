@@ -1,12 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { Menu, X, Phone, MessageCircle } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Menu, X, Phone, MessageCircle, User, LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '../../contexts/AuthContext';
+import toast from 'react-hot-toast';
 
 const Header = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, signOut } = useAuth();
   
   // Determine if we're on the home page (which has a dark hero section)
   const isHomePage = location.pathname === '/';
@@ -41,6 +46,22 @@ const Header = () => {
 
   const handleWhatsApp = () => {
     window.open('https://wa.me/917895108392?text=Hi! I would like to book a free chess demo session.', '_blank');
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      toast.success('Signed out successfully');
+      navigate('/');
+      setShowUserMenu(false);
+    } catch (error) {
+      toast.error('Error signing out');
+    }
+  };
+
+  const handleAuthClick = () => {
+    navigate('/auth');
+    closeMenu();
   };
 
   return (
@@ -95,6 +116,38 @@ const Header = () => {
               <MessageCircle size={18} />
               <span>Book Demo</span>
             </button>
+            
+            {/* Authentication Section */}
+            {user && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowUserMenu(!showUserMenu)}
+                  className="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  <User size={18} />
+                </button>
+                
+                {showUserMenu && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-50">
+                    <Link
+                      to="/my-reports"
+                      onClick={() => setShowUserMenu(false)}
+                      className="flex items-center space-x-2 w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-100 transition-colors"
+                    >
+                      <User size={16} />
+                      <span>My Reports</span>
+                    </Link>
+                    <button
+                      onClick={handleSignOut}
+                      className="flex items-center space-x-2 w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-100 transition-colors"
+                    >
+                      <LogOut size={16} />
+                      <span>Sign Out</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Mobile Menu Button */}
@@ -150,6 +203,27 @@ const Header = () => {
                     <MessageCircle size={18} />
                     <span>Book Demo</span>
                   </button>
+                  
+                  {/* Mobile Authentication */}
+                  {user && (
+                    <div className="border-t border-gray-200 pt-2 mt-2">
+                      <Link
+                        to="/my-reports"
+                        onClick={closeMenu}
+                        className="flex items-center justify-center space-x-2 w-full px-4 py-2 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
+                      >
+                        <User size={18} />
+                        <span>My Reports</span>
+                      </Link>
+                      <button
+                        onClick={handleSignOut}
+                        className="flex items-center justify-center space-x-2 w-full px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      >
+                        <LogOut size={18} />
+                        <span>Sign Out</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             </motion.div>

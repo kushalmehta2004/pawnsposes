@@ -13,7 +13,10 @@ const Chessboard = ({
   onMove,                // callback({ from, to, san, fen }) when a legal move is made
   highlightedSquares = [],
   lastMove = null,
-  showCoordinates = true
+  showCoordinates = true,
+  enableArrows = true,   // enable right-click drawing
+  preserveDrawingsOnPositionChange = false, // keep drawings when position updates
+  onDrawChange           // optional callback({ arrows, circles })
 }) => {
   // Internal chess engine for legal moves and updates
   const [selectedSquare, setSelectedSquare] = useState(null);
@@ -26,6 +29,14 @@ const Chessboard = ({
     setSelectedSquare(null);
     setLegalTargets([]);
   }, [position]);
+
+  // Arrow/circle drawing state
+  const [drawnArrows, setDrawnArrows] = useState([]); // [{ from, to, color }]
+  const [drawnCircles, setDrawnCircles] = useState([]); // [{ square, color }]
+  const [dragStartSq, setDragStartSq] = useState(null);
+  const [dragCurSq, setDragCurSq] = useState(null);
+  const [dragColor, setDragColor] = useState('green');
+  const boardGridRef = useRef(null);
 
   const chess = useMemo(() => {
     try {
@@ -129,10 +140,41 @@ const Chessboard = ({
     }
   };
 
-  // ===== Smooth piece movement overlay =====
-  const SQUARE_SIZE = 56; // px, must match boardGridStyle squares
-  const PIECE_SIZE = 46;  // px, must match pieceImgStyle
-  const PIECE_OFFSET = (SQUARE_SIZE - PIECE_SIZE) / 2; // center piece in square
+  // ===== Responsive sizing (fits mobile, unchanged on desktop) =====
+  const wrapperRef = useRef(null);
+  const [squareSize, setSquareSize] = useState(56); // px per square (max 56)
+  const [pieceSize, setPieceSize] = useState(52);   // px per piece (tracks square size)
+  const [isDesktop, setIsDesktop] = useState(false); // viewport breakpoint tracking
+
+  useEffect(() => {
+    const handler = () => setIsDesktop(window.innerWidth >= 1024);
+    handler(); // set initial
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
+
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+
+    const update = () => {
+      const width = el.clientWidth || 0;
+      // Fit 8 columns into available width with desktop cap; keep mobile untouched
+      const desktopCap = isDesktop ? 64 : 72; // 8x64=512 on desktop; mobile can go up to 72 for compact tablets
+      const target = Math.min(desktopCap, width / 8);
+      const s = Math.max(28, target); // reasonable minimum for small phones
+      const p = Math.max(24, s - 4);
+      setSquareSize(s);
+      setPieceSize(p);
+    };
+
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const PIECE_OFFSET = (squareSize - pieceSize) / 2; // center piece in square
 
   const prevPiecesRef = useRef([]); // [{ id, type, color, square }]
   const idCounterRef = useRef(0);
@@ -155,13 +197,13 @@ const Chessboard = ({
     const { file, rank } = squareToFileRankIndex(sq);
     if (orientation === 'white') {
       return {
-        x: file * SQUARE_SIZE + PIECE_OFFSET,
-        y: (7 - rank) * SQUARE_SIZE + PIECE_OFFSET,
+        x: file * squareSize + PIECE_OFFSET,
+        y: (7 - rank) * squareSize + PIECE_OFFSET,
       };
     } else {
       return {
-        x: (7 - file) * SQUARE_SIZE + PIECE_OFFSET,
-        y: rank * SQUARE_SIZE + PIECE_OFFSET,
+        x: (7 - file) * squareSize + PIECE_OFFSET,
+        y: rank * squareSize + PIECE_OFFSET,
       };
     }
   };
@@ -226,29 +268,118 @@ const Chessboard = ({
 
   // Styles
   const containerStyle = {
-    display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '1rem'
+    display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '1rem 0',
+    width: '100%', maxWidth: '100%', minWidth: 0
   };
 
-  const chessboardStyle = {
-    display: 'flex', flexDirection: 'column', borderRadius: '6px'
-  };
+  const chessboardStyle = useMemo(() => ({
+    display: 'flex',
+    flexDirection: 'column',
+    borderRadius: '6px',
+    padding: 0,
+    margin: '0 auto',
+    // On desktop, make wrapper fit the board width exactly (no internal right space)
+    // On mobile/tablet, keep fluid width
+    width: isDesktop ? `${squareSize * 8}px` : '100%',
+    maxWidth: isDesktop ? `${squareSize * 8}px` : '100%'
+  }), [isDesktop, squareSize]);
 
-  const filesStyle = { display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: '0', padding: '0 8px' };
+  const filesStyle = { display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: '0', padding: '0' };
   const fileLabelStyle = { textAlign: 'center', fontWeight: 600, color: '#444', fontSize: '0.8rem', padding: '2px 0', fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial' };
 
   const boardWithRanksStyle = { display: 'flex', alignItems: 'center' };
   const ranksStyle = { display: 'flex', flexDirection: 'column', width: '20px' };
-  const rankLabelStyle = { height: `${SQUARE_SIZE}px`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, color: '#444', fontSize: '0.8rem', fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial' };
+  const rankLabelStyle = { height: `${squareSize}px`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, color: '#444', fontSize: '0.8rem', fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial' };
 
-  const boardGridStyle = { display: 'grid', gridTemplateColumns: `repeat(8, ${SQUARE_SIZE}px)`, gridTemplateRows: `repeat(8, ${SQUARE_SIZE}px)`, gap: '0', position: 'relative' };
+  const boardGridStyle = { display: 'grid', gridTemplateColumns: `repeat(8, ${squareSize}px)`, gridTemplateRows: `repeat(8, ${squareSize}px)`, gap: '0', position: 'relative', borderRadius: '6px', overflow: 'hidden' };
 
-  const squareBaseStyle = { width: `${SQUARE_SIZE}px`, height: `${SQUARE_SIZE}px`, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' };
-
-  const overlayStyle = {
-    position: 'absolute', top: 0, left: 0, width: `${SQUARE_SIZE * 8}px`, height: `${SQUARE_SIZE * 8}px`, pointerEvents: 'none'
+  // Helpers for drawing color from modifiers (Lichess-like)
+  const colorFromEvent = (e) => {
+    // Default green; Shift=red, Alt=blue, Shift+Alt=yellow
+    const shift = e.shiftKey;
+    const alt = e.altKey;
+    if (shift && alt) return 'yellow';
+    if (shift) return 'red';
+    if (alt) return 'blue';
+    return 'green';
   };
 
-  const pieceImgBaseStyle = { width: `${PIECE_SIZE}px`, height: `${PIECE_SIZE}px`, userSelect: 'none', pointerEvents: 'none' };
+  // Map pointer coordinates to board square
+  const pointToSquare = (clientX, clientY) => {
+    const el = boardGridRef.current;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    let x = clientX - rect.left;
+    let y = clientY - rect.top;
+    if (x < 0 || y < 0 || x > rect.width || y > rect.height) return null;
+    const col = Math.min(7, Math.max(0, Math.floor(x / squareSize)));
+    const row = Math.min(7, Math.max(0, Math.floor(y / squareSize)));
+    // Convert row/col back to logical square (respects orientation)
+    return squareFromRowCol(row, col);
+  };
+
+  // Toggle helpers
+  const toggleArrow = (from, to, color) => {
+    const key = `${from}-${to}-${color}`;
+    const exists = drawnArrows.some(a => `${a.from}-${a.to}-${a.color}` === key);
+    const next = exists ? drawnArrows.filter(a => `${a.from}-${a.to}-${a.color}` !== key) : [...drawnArrows, { from, to, color }];
+    setDrawnArrows(next);
+    if (onDrawChange) onDrawChange({ arrows: next, circles: drawnCircles });
+  };
+  const toggleCircle = (square, color) => {
+    const key = `${square}-${color}`;
+    const exists = drawnCircles.some(c => `${c.square}-${c.color}` === key);
+    const next = exists ? drawnCircles.filter(c => `${c.square}-${c.color}` !== key) : [...drawnCircles, { square, color }];
+    setDrawnCircles(next);
+    if (onDrawChange) onDrawChange({ arrows: drawnArrows, circles: next });
+  };
+
+  // Pointer handlers for right-click drawing
+  const onPointerDownBoard = (e) => {
+    if (!enableArrows) return;
+    if (e.button !== 2) return; // right button only
+    e.preventDefault();
+    const sq = pointToSquare(e.clientX, e.clientY);
+    if (!sq) return;
+    setDragColor(colorFromEvent(e));
+    setDragStartSq(sq);
+    setDragCurSq(sq);
+  };
+  const onPointerMoveBoard = (e) => {
+    if (!enableArrows) return;
+    if (dragStartSq == null) return;
+    const sq = pointToSquare(e.clientX, e.clientY);
+    setDragColor(colorFromEvent(e));
+    setDragCurSq(sq);
+  };
+  const onPointerUpBoard = (e) => {
+    if (!enableArrows) return;
+    if (dragStartSq == null) return;
+    const endSq = pointToSquare(e.clientX, e.clientY);
+    const color = dragColor; // finalize with the preview color
+    if (endSq && dragStartSq) {
+      if (endSq === dragStartSq) {
+        toggleCircle(endSq, color);
+      } else {
+        toggleArrow(dragStartSq, endSq, color);
+      }
+    }
+    setDragStartSq(null);
+    setDragCurSq(null);
+  };
+  const onContextMenuBoard = (e) => {
+    if (!enableArrows) return;
+    // prevent default browser context menu
+    e.preventDefault();
+  };
+
+  const squareBaseStyle = { width: `${squareSize}px`, height: `${squareSize}px`, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' };
+
+  const overlayStyle = {
+    position: 'absolute', top: 0, left: 0, width: `${squareSize * 8}px`, height: `${squareSize * 8}px`, pointerEvents: 'none'
+  };
+
+  const pieceImgBaseStyle = { width: `${pieceSize}px`, height: `${pieceSize}px`, userSelect: 'none', pointerEvents: 'none' };
 
   const filesTop = showCoordinates ? files : [];
   const ranksLeft = showCoordinates ? ranks : [];
@@ -256,9 +387,17 @@ const Chessboard = ({
   const filesBottom = showCoordinates ? files : [];
 
   return (
-    <div style={containerStyle}>
-      <div style={chessboardStyle}>
-        <div style={boardGridStyle}>
+    <div style={containerStyle} className="chessboard-container">
+      <div style={chessboardStyle} ref={wrapperRef}>
+        <div
+          style={boardGridStyle}
+          className="chessboard-grid"
+          ref={boardGridRef}
+          onContextMenu={onContextMenuBoard}
+          onPointerDown={onPointerDownBoard}
+          onPointerMove={onPointerMoveBoard}
+          onPointerUp={onPointerUpBoard}
+        >
           {/* Squares grid (clickable) */}
           {boardDisplay.map((row, rowIndex) => (
             row.map((piece, colIndex) => {
@@ -269,6 +408,7 @@ const Chessboard = ({
               return (
                 <div
                   key={`${rowIndex}-${colIndex}`}
+                  className={`chessboard-square ${light ? 'light' : 'dark'}`}
                   style={{ ...squareBaseStyle, backgroundColor: bg, cursor: 'pointer' }}
                   onClick={() => onSquareClick(rowIndex, colIndex)}
                 >
@@ -285,10 +425,7 @@ const Chessboard = ({
                     </span>
                   )}
 
-                  {/* Legal move dots (lichess-like) */}
-                  {selectedSquare && legalTargets.includes(square) && (
-                    <div style={{ width: 16, height: 16, borderRadius: '50%', background: 'rgba(0,0,0,0.25)' }} />
-                  )}
+
                 </div>
               );
             })
@@ -310,6 +447,115 @@ const Chessboard = ({
               );
             })}
           </div>
+
+          {/* Legal move markers overlay (on top of pieces) */}
+          {selectedSquare && legalTargets.length > 0 && (
+            <svg width={squareSize * 8} height={squareSize * 8} style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}>
+              {legalTargets.map((sq, idx) => {
+                const { x, y } = squareToXY(sq);
+                const cx = x + pieceSize / 2;
+                const cy = y + pieceSize / 2;
+                const r = Math.max(6, pieceSize * 0.18);
+                return <circle key={idx} cx={cx} cy={cy} r={r} fill="rgba(0,0,0,0.35)" />;
+              })}
+            </svg>
+          )}
+
+          {/* Drawings overlay (SVG) */}
+          {enableArrows && (
+            <svg width={squareSize * 8} height={squareSize * 8} style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}>
+              <defs>
+                <marker id="arrowhead-green" markerWidth="10" markerHeight="7" refX="7.5" refY="3.5" orient="auto">
+                  <polygon points="0 0, 7 3.5, 0 7" fill="#2ecc71" />
+                </marker>
+                <marker id="arrowhead-red" markerWidth="10" markerHeight="7" refX="7.5" refY="3.5" orient="auto">
+                  <polygon points="0 0, 7 3.5, 0 7" fill="#e74c3c" />
+                </marker>
+                <marker id="arrowhead-blue" markerWidth="10" markerHeight="7" refX="7.5" refY="3.5" orient="auto">
+                  <polygon points="0 0, 7 3.5, 0 7" fill="#3498db" />
+                </marker>
+                <marker id="arrowhead-yellow" markerWidth="10" markerHeight="7" refX="7.5" refY="3.5" orient="auto">
+                  <polygon points="0 0, 7 3.5, 0 7" fill="#f1c40f" />
+                </marker>
+              </defs>
+              {/* Existing arrows */}
+              {drawnArrows.map((a, idx) => {
+                const from = squareToXY(a.from);
+                const to = squareToXY(a.to);
+                const color = a.color;
+                const fill = color === 'red' ? '#e74c3c' : color === 'blue' ? '#3498db' : color === 'yellow' ? '#f1c40f' : '#2ecc71';
+                const x1 = from.x + pieceSize/2, y1 = from.y + pieceSize/2;
+                const x2 = to.x + pieceSize/2, y2 = to.y + pieceSize/2;
+                // Arrow geometry without markers: shaft + head triangle
+                const sw = 6;
+                const dx = x2 - x1, dy = y2 - y1;
+                const len = Math.hypot(dx, dy) || 1;
+                const ux = dx / len, uy = dy / len;
+                const headLen = Math.max(10, sw * 2.2);
+                const halfHeadWidth = Math.max(6, sw * 1.2);
+                const baseX = x2 - ux * headLen;
+                const baseY = y2 - uy * headLen;
+                const overlap = 0.5; // avoid anti-aliased gap between shaft and head
+                const shaftX2 = baseX - ux * overlap;
+                const shaftY2 = baseY - uy * overlap;
+                const px = -uy, py = ux; // perpendicular unit vector
+                const leftX = baseX + px * halfHeadWidth;
+                const leftY = baseY + py * halfHeadWidth;
+                const rightX = baseX - px * halfHeadWidth;
+                const rightY = baseY - py * halfHeadWidth;
+                return (
+                  <g key={idx}>
+                    <line x1={x1} y1={y1} x2={shaftX2} y2={shaftY2} stroke={fill} strokeWidth={sw} strokeLinecap="butt" />
+                    <polygon points={`${x2},${y2} ${leftX},${leftY} ${rightX},${rightY}`} fill={fill} />
+                  </g>
+                );
+              })}
+              {/* Existing circles */}
+              {drawnCircles.map((c, idx) => {
+                const { x, y } = squareToXY(c.square);
+                const stroke = c.color === 'red' ? '#e74c3c' : c.color === 'blue' ? '#3498db' : c.color === 'yellow' ? '#f1c40f' : '#2ecc71';
+                const cx = x + pieceSize/2, cy = y + pieceSize/2;
+                const r = Math.max(10, pieceSize/2 + 2);
+                return (
+                  <circle key={idx} cx={cx} cy={cy} r={r} stroke={stroke} strokeWidth={5} fill="none" />
+                );
+              })}
+              {/* Live preview while dragging */}
+              {dragStartSq && dragCurSq && (
+                (() => {
+                  const from = squareToXY(dragStartSq);
+                  const to = squareToXY(dragCurSq);
+                  const x1 = from.x + pieceSize/2, y1 = from.y + pieceSize/2;
+                  const x2 = to.x + pieceSize/2, y2 = to.y + pieceSize/2;
+                  const color = dragColor;
+                  const fill = color === 'red' ? '#e74c3c' : color === 'blue' ? '#3498db' : color === 'yellow' ? '#f1c40f' : '#2ecc71';
+                  // Arrow geometry without markers (preview): shaft + head triangle
+                  const sw = 6;
+                  const dx = x2 - x1, dy = y2 - y1;
+                  const len = Math.hypot(dx, dy) || 1;
+                  const ux = dx / len, uy = dy / len;
+                  const headLen = Math.max(10, sw * 2.2);
+                  const halfHeadWidth = Math.max(6, sw * 1.2);
+                  const baseX = x2 - ux * headLen;
+                  const baseY = y2 - uy * headLen;
+                  const overlap = 0.5;
+                  const shaftX2 = baseX - ux * overlap;
+                  const shaftY2 = baseY - uy * overlap;
+                  const px = -uy, py = ux;
+                  const leftX = baseX + px * halfHeadWidth;
+                  const leftY = baseY + py * halfHeadWidth;
+                  const rightX = baseX - px * halfHeadWidth;
+                  const rightY = baseY - py * halfHeadWidth;
+                  return (
+                    <g>
+                      <line x1={x1} y1={y1} x2={shaftX2} y2={shaftY2} stroke={fill} strokeWidth={sw} strokeLinecap="butt" />
+                      <polygon points={`${x2},${y2} ${leftX},${leftY} ${rightX},${rightY}`} fill={fill} />
+                    </g>
+                  );
+                })()
+              )}
+            </svg>
+          )}
         </div>
       </div>
     </div>

@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Loader2, ArrowLeft, Eye, RotateCcw } from 'lucide-react';
+import { Loader2, ArrowLeft, Eye, EyeOff, RotateCcw, Undo2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Chess } from 'chess.js';
 import Chessboard from '../components/Chessboard';
 import puzzleGenerationService from '../services/puzzleGenerationService';
+import { initializePuzzleDatabase, getPuzzleDatabase } from '../utils/puzzleDatabase';
 
 const PuzzlePage = () => {
   const { puzzleType } = useParams();
@@ -22,6 +23,8 @@ const PuzzlePage = () => {
   const [puzzleMetadata, setPuzzleMetadata] = useState(null);
   const [orientation, setOrientation] = useState('white');
   const [resetCounter, setResetCounter] = useState(0);
+  const [difficulty, setDifficulty] = useState('easy');
+  const [fullPuzzles, setFullPuzzles] = useState([]);
 
   // Get analysis data and username from location state
   const analysisData = location.state?.analysis;
@@ -29,10 +32,23 @@ const PuzzlePage = () => {
 
   const puzzle = puzzles[currentPuzzle];
 
+  // Key for caching this user's puzzles for this category
+  const getCacheKey = () => {
+    const user = username || 'anonymous';
+    // Increment version to refresh cached sets when generation rules change
+    const version = 'v5-01-mistakes-multimove-only-fill-dedup';
+    const diff = (['fix-weaknesses', 'master-openings', 'sharpen-endgame'].includes(puzzleType)) ? `:${difficulty}` : '';
+    return `pawnsposes:puzzles:${user}:${puzzleType}${diff}:${version}`;
+  };
+
   // Load puzzles when component mounts
+  const deps = [puzzleType, username];
+  if (['fix-weaknesses', 'master-openings', 'sharpen-endgame'].includes(puzzleType)) {
+    deps.push(difficulty);
+  }
   useEffect(() => {
     loadPuzzles();
-  }, [puzzleType, username]);
+  }, deps);
 
   // Keep board orientation in sync with current FEN while puzzle is active
   useEffect(() => {
@@ -41,6 +57,14 @@ const PuzzlePage = () => {
     const side = (fen && fen.split(' ')[1] === 'b') ? 'black' : 'white';
     setOrientation(side);
   }, [currentPuzzle, puzzles]);
+
+  // For learn-mistakes, show all puzzles without difficulty filtering
+  useEffect(() => {
+    if (puzzleType === 'learn-mistakes' && fullPuzzles.length > 0) {
+      setPuzzles(fullPuzzles);
+      setCurrentPuzzle(0);
+    }
+  }, [fullPuzzles, puzzleType]);
 
   const loadPuzzles = async () => {
     if (!username) {
@@ -54,28 +78,116 @@ const PuzzlePage = () => {
     try {
       console.log(`🧩 Loading ${puzzleType} puzzles for ${username}...`);
       
+      // 1) Try to reuse cached puzzles for this user+category
+      const cacheKey = getCacheKey();
+      let cached = null;
+      // Disable IndexedDB cache for fix-weaknesses (always fetch from shards)
+      if (puzzleType !== 'fix-weaknesses') {
+        await initializePuzzleDatabase();
+        const db = getPuzzleDatabase();
+        cached = await db.getSetting(cacheKey, null);
+      }
+      if (cached && Array.isArray(cached.puzzles) && cached.puzzles.length > 0) {
+        console.log('♻️ Reusing cached puzzles for this session:', cacheKey);
+        const initialized = cached.puzzles.map(p => {
+          // Base fields
+          let initialPosition = p.initialPosition || p.position;
+          let position = p.position || p.initialPosition || initialPosition;
+          let lineIndex = typeof p.lineIndex === 'number' ? p.lineIndex : (typeof p.startLineIndex === 'number' ? p.startLineIndex : 0);
+          let startLineIndex = typeof p.startLineIndex === 'number' ? p.startLineIndex : 0;
+          let sideToMove = p.sideToMove || ((position || '').split(' ')[1] === 'b' ? 'black' : 'white');
+
+          // POV alignment for Learn From Mistakes so the USER moves first
+          try {
+            if (puzzleType === 'learn-mistakes' && (p?.source === 'user_mistake' || p?.source === 'user_game')) {
+              const tokens = (p.lineUci || '').split(/\s+/).filter(Boolean);
+              if (tokens.length > 0) {
+                const eng = new Chess(initialPosition);
+                const isUci = (s) => /^[a-h][1-8][a-h][1-8](?:[qrbn])?$/i.test(s || '');
+                const normalizeSan = (s) => (s || '').replace(/[+#?!]/g, '').replace(/=/g, '').trim();
+                const sol = p.solution || '';
+                // Test if the provided solution is legal from the current position (indicates user to move)
+                let legalFromHere = false;
+                try {
+                  if (isUci(sol)) {
+                    const from = sol.slice(0, 2).toLowerCase();
+                    const to = sol.slice(2, 4).toLowerCase();
+                    const prom = sol.length > 4 ? sol[4].toLowerCase() : undefined;
+                    const test1 = new Chess(initialPosition);
+                    legalFromHere = !!test1.move({ from, to, promotion: prom });
+                  } else if (sol) {
+                    const test2 = new Chess(initialPosition);
+                    legalFromHere = !!test2.move(normalizeSan(sol));
+                  }
+                } catch (_) { /* ignore */ }
+
+                // If solution is NOT legal from this position, but the first PV move is,
+                // pre-apply the first PV move so the user plays next
+                if (!legalFromHere) {
+                  const first = tokens[0];
+                  if (isUci(first)) {
+                    const e = new Chess(initialPosition);
+                    const from = first.slice(0, 2);
+                    const to = first.slice(2, 4);
+                    const prom = first.length > 4 ? first[4] : undefined;
+                    const m = e.move({ from, to, promotion: prom });
+                    if (m) {
+                      initialPosition = e.fen();
+                      position = initialPosition;
+                      startLineIndex = 1;
+                      lineIndex = 1;
+                      sideToMove = initialPosition.split(' ')[1] === 'b' ? 'black' : 'white';
+                    }
+                  }
+                }
+              }
+            }
+          } catch (_) { /* no-op */ }
+
+          return {
+            ...p,
+            initialPosition,
+            position,
+            lineIndex,
+            startLineIndex,
+            sideToMove
+          };
+        });
+        setPuzzles(initialized);
+        setFullPuzzles(initialized);
+        setPuzzleMetadata(cached.metadata || {});
+        setCurrentPuzzle(0); // Reset to first puzzle
+        const firstFen = initialized[0]?.position || initialized[0]?.initialPosition;
+        const firstSide = (firstFen && firstFen.split(' ')[1] === 'b') ? 'black' : 'white';
+        setOrientation(firstSide);
+        setIsLoading(false);
+        return;
+      }
+      
       let generatedPuzzles = [];
       let metadata = {};
 
       switch (puzzleType) {
         case 'fix-weaknesses':
-          generatedPuzzles = await puzzleGenerationService.generateWeaknessPuzzles(username, { maxPuzzles: 20 });
+          generatedPuzzles = await puzzleGenerationService.generateWeaknessPuzzles(username, { maxPuzzles: 10, difficulty });
           metadata = {
             title: 'Fix My Weaknesses',
             subtitle: 'Puzzles targeting your recurring mistake patterns',
             description: 'These puzzles are generated from your most common mistakes to help you improve.'
           };
           break;
-          
-        case 'learn-mistakes':
-          generatedPuzzles = await puzzleGenerationService.generateMistakePuzzles(username, { maxPuzzles: 20 });
+
+        case 'learn-mistakes': {
+          // Generate directly from user mistakes to ensure distinct set
+          generatedPuzzles = await puzzleGenerationService.generateMistakePuzzles(username, { maxPuzzles: 30 });
           metadata = {
             title: 'Learn From My Mistakes',
-            subtitle: 'Positions where you missed the best move',
-            description: 'Practice the exact positions where you made mistakes in your games.'
+            subtitle: 'Puzzles from your mistakes',
+            description: 'Practice positions created from your own mistakes.'
           };
           break;
-          
+        }
+
         case 'master-openings': {
           // Prefer SINGLE highest-frequency opening family from analysis state
           let topFamilies = location.state?.topOpeningFamilies 
@@ -122,7 +234,7 @@ const PuzzlePage = () => {
 
           generatedPuzzles = await puzzleGenerationService.generateOpeningPuzzles(
             username,
-            { maxPuzzles: 10, preferredFamilies: singleTop }
+            { maxPuzzles: 10, difficulty, preferredFamilies: singleTop }
           );
           const sub = (singleTop && singleTop.length)
             ? `Puzzles from your most played opening: ${singleTop[0]}`
@@ -136,11 +248,11 @@ const PuzzlePage = () => {
         }
           
         case 'sharpen-endgame':
-          generatedPuzzles = await puzzleGenerationService.generateEndgamePuzzles({ maxPuzzles: 12 });
+          generatedPuzzles = await puzzleGenerationService.generateEndgamePuzzles({ maxPuzzles: 10, difficulty });
           metadata = {
             title: 'Sharpen My Endgame',
-            subtitle: 'Essential endgame techniques (K+P, rook endings, opposition, zugzwang)',
-            description: 'Master fundamental endgame positions and techniques. Auto-replies and multi-step validation enabled.'
+            subtitle: 'Essential endgame techniques ',
+            description: 'Master fundamental endgame positions and techniques.'
           };
           break;
           
@@ -149,6 +261,15 @@ const PuzzlePage = () => {
           navigate('/report-display');
           return;
       }
+
+      // Deduplicate puzzles based on position to avoid repeats
+      const seen = new Set();
+      generatedPuzzles = generatedPuzzles.filter(p => {
+        const key = p.position || p.initialPosition;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
 
       if (generatedPuzzles.length === 0) {
         const msg = puzzleType === 'master-openings'
@@ -167,6 +288,42 @@ const PuzzlePage = () => {
         let initialLineIndex = 0;
         let sideToMove = p.sideToMove;
         try {
+          // Ensure POV alignment for Learn From Mistakes too: user should move first
+          if (puzzleType === 'learn-mistakes' && tokens.length > 0 && (p?.source === 'user_mistake' || p?.source === 'user_game')) {
+            const first = tokens[0];
+            if (/^[a-h][1-8][a-h][1-8](?:[qrbn])?$/i.test(first)) {
+              // If the provided solution isn't legal from the current FEN, pre-apply first PV move
+              const isUci = (s) => /^[a-h][1-8][a-h][1-8](?:[qrbn])?$/i.test(s || '');
+              const normalizeSan = (s) => (s || '').replace(/[+#?!]/g, '').replace(/=/g, '').trim();
+              const sol = p.solution || '';
+              let legalFromHere = false;
+              try {
+                if (isUci(sol)) {
+                  const test = new Chess(initialPosition);
+                  const from = sol.slice(0, 2).toLowerCase();
+                  const to = sol.slice(2, 4).toLowerCase();
+                  const prom = sol.length > 4 ? sol[4].toLowerCase() : undefined;
+                  legalFromHere = !!test.move({ from, to, promotion: prom });
+                } else if (sol) {
+                  const test = new Chess(initialPosition);
+                  legalFromHere = !!test.move(normalizeSan(sol));
+                }
+              } catch (_) {}
+              if (!legalFromHere) {
+                const engine = new Chess(initialPosition);
+                const from = first.slice(0, 2);
+                const to = first.slice(2, 4);
+                const prom = first.length > 4 ? first[4] : undefined;
+                const m = engine.move({ from, to, promotion: prom });
+                if (m) {
+                  initialPosition = engine.fen();
+                  initialLineIndex = 1;
+                  sideToMove = initialPosition.split(' ')[1] === 'b' ? 'black' : 'white';
+                }
+              }
+            }
+          }
+
           if (puzzleType === 'master-openings' && tokens.length > 0) {
             const first = tokens[0];
             if (/^[a-h][1-8][a-h][1-8](?:[qrbn])?$/i.test(first)) {
@@ -196,8 +353,21 @@ const PuzzlePage = () => {
           sideToMove
         };
       });
+
+      // 2) Persist snapshot for this user+category to keep puzzles stable across navigation
+      if (puzzleType !== 'fix-weaknesses') {
+        try {
+          const db = getPuzzleDatabase();
+          await db.saveSetting(cacheKey, { puzzles: initialized, metadata, savedAt: Date.now() });
+        } catch (e) {
+          console.warn('⚠️ Failed to persist puzzle snapshot; proceeding without cache.', e);
+        }
+      }
+
       setPuzzles(initialized);
+      setFullPuzzles(initialized);
       setPuzzleMetadata(metadata);
+      setCurrentPuzzle(0); // Reset to first puzzle when regenerating
       // Set board orientation based on starting FEN of first puzzle
       const firstFen = initialized[0]?.position || initialized[0]?.initialPosition;
       const firstSide = (firstFen && firstFen.split(' ')[1] === 'b') ? 'black' : 'white';
@@ -256,7 +426,7 @@ const PuzzlePage = () => {
     setSolutionText('');
     setShowSolution(false);
     // Reset current puzzle to its initial FEN and its original starting line index
-    setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: pz.initialPosition, lineIndex: (typeof pz.startLineIndex === 'number' ? pz.startLineIndex : 0) } : pz));
+    setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: pz.initialPosition, lineIndex: (typeof pz.startLineIndex === 'number' ? pz.startLineIndex : 0), completed: false } : pz));
     // Orientation from the reset position
     const side = (puzzles[currentPuzzle]?.initialPosition || puzzles[currentPuzzle]?.position || '').split(' ')[1] === 'b' ? 'black' : 'white';
     setOrientation(side);
@@ -264,12 +434,65 @@ const PuzzlePage = () => {
     setResetCounter((c) => c + 1);
   };
 
+  // Step back exactly one user turn (rewind to previous user move in the PV)
+  const handleStepBack = () => {
+    try {
+      const pz = puzzles[currentPuzzle];
+      const tokens = (pz?.lineUci || '').split(/\s+/).filter(Boolean);
+      const startIdx = typeof pz?.startLineIndex === 'number' ? pz.startLineIndex : 0;
+      let curIdx = typeof pz?.lineIndex === 'number' ? pz.lineIndex : startIdx;
+
+      // If no line or at the very start, nothing to step back
+      if (!tokens.length || curIdx <= startIdx) return;
+
+      // We want to end on a state where it's the user's turn to move next.
+      // The onMove advances: user move (idx), maybe engine reply (idx+1). So user turns are at even offsets from startIdx.
+      // Compute previous user index boundary.
+      const prevUserIdx = curIdx - ((curIdx - startIdx) % 2 === 0 ? 2 : 1);
+      const targetIdx = Math.max(startIdx, prevUserIdx);
+
+      // Rebuild position from initialPosition up to targetIdx moves applied
+      const engine = new Chess(pz.initialPosition || pz.position);
+      for (let i = startIdx; i < targetIdx; i++) {
+        const u = tokens[i];
+        if (!/^[a-h][1-8][a-h][1-8](?:[qrbn])?$/i.test(u)) break;
+        const from = u.slice(0, 2);
+        const to = u.slice(2, 4);
+        const prom = u.length > 4 ? u[4] : undefined;
+        const m = engine.move({ from, to, promotion: prom });
+        if (!m) break;
+      }
+
+      const newFen = engine.fen();
+      const side = newFen.split(' ')[1] === 'b' ? 'black' : 'white';
+
+      setFeedback('');
+      setShowSolution(false);
+      setPuzzles(prev => prev.map((pz2, i) => i === currentPuzzle ? { ...pz2, position: newFen, lineIndex: targetIdx, completed: false } : pz2));
+      setOrientation(side);
+      // Force re-mount to clear any drag state
+      setResetCounter((c) => c + 1);
+    } catch (_) {
+      // no-op on failure
+    }
+  };
+
   const handleShowSolution = () => {
+    // Toggle: if visible, hide and clear
+    if (showSolution) {
+      setShowSolution(false);
+      setSolutionText('');
+      return;
+    }
+
     // Prepare remaining solution from the CURRENT position and current line index
     const tokens = (puzzle?.lineUci || '').split(/\s+/).filter(Boolean);
     const curIdx = typeof puzzle?.lineIndex === 'number' ? puzzle.lineIndex : 0;
     if (!tokens.length || curIdx >= tokens.length) {
-      setSolutionText(`Solution: ${puzzle?.solution}${puzzle?.explanation ? ' — ' + puzzle.explanation : ''}`);
+      const _exp1 = (puzzle?.explanation || '').trim()
+        .replace(/\s*(?:—|-)?\s*Puzzle sourced from Lichess data ?set\.?$/i, '')
+        .replace(/\s*(?:—|-)?\s*From curated endgame data ?set\.?$/i, '');
+      setSolutionText(`Solution: ${puzzle?.solution}${_exp1 ? ' — ' + _exp1 : ''}`);
       setShowSolution(true);
       return;
     }
@@ -287,10 +510,16 @@ const PuzzlePage = () => {
         if (!m) break;
         sans.push(m.san);
       }
-      setSolutionText(`Solution: ${sans.join(' ')}${puzzle?.explanation ? ' — ' + puzzle.explanation : ''}`);
+      const _exp2 = (puzzle?.explanation || '').trim()
+        .replace(/\s*(?:—|-)?\s*Puzzle sourced from Lichess data ?set\.?$/i, '')
+        .replace(/\s*(?:—|-)?\s*From curated endgame data ?set\.?$/i, '');
+      setSolutionText(`Solution: ${sans.join(' ')}${_exp2 ? ' — ' + _exp2 : ''}`);
       setShowSolution(true);
     } catch (_) {
-      setSolutionText(`Solution: ${puzzle?.solution}${puzzle?.explanation ? ' — ' + puzzle.explanation : ''}`);
+      const _exp3 = (puzzle?.explanation || '').trim()
+        .replace(/\s*(?:—|-)?\s*Puzzle sourced from Lichess data ?set\.?$/i, '')
+        .replace(/\s*(?:—|-)?\s*From curated endgame data ?set\.?$/i, '');
+      setSolutionText(`Solution: ${puzzle?.solution}${_exp3 ? ' — ' + _exp3 : ''}`);
       setShowSolution(true);
     }
   };
@@ -339,7 +568,7 @@ const PuzzlePage = () => {
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <button 
+              <button
                 onClick={handleBackToReport}
                 className="text-gray-600 hover:text-gray-800 mb-2 flex items-center"
               >
@@ -356,13 +585,30 @@ const PuzzlePage = () => {
               {puzzleMetadata?.description && (
                 <p className="text-sm text-gray-500 mt-1">{puzzleMetadata.description}</p>
               )}
+              {(puzzleType === 'fix-weaknesses' || puzzleType === 'master-openings' || puzzleType === 'sharpen-endgame') && (
+                <div className="mt-3">
+                  <label htmlFor="difficulty-select" className="block text-sm font-medium text-gray-700 mb-1">
+                    Difficulty Level
+                  </label>
+                  <select
+                    id="difficulty-select"
+                    value={difficulty}
+                    onChange={(e) => setDifficulty(e.target.value)}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="easy">Easy </option>
+                    <option value="medium">Medium </option>
+                    <option value="hard">Hard </option>
+                  </select>
+                </div>
+              )}
             </div>
             <div className="text-right">
               <div className="text-sm text-gray-500">
                 Puzzle {currentPuzzle + 1} of {puzzles.length}
               </div>
               {puzzle?.source && (
-                <div className={`text-xs mt-1 px-2 py-1 rounded-full inline-block ${
+                <div className={`puzzle-source-badge text-xs mt-1 px-2 py-1 rounded-full inline-block ${
                   puzzle.source === 'user_game' ? 'bg-green-100 text-green-700' :
                   puzzle.source === 'user_mistake' ? 'bg-blue-100 text-blue-700' :
                   puzzle.source === 'opening_repertoire' ? 'bg-purple-100 text-purple-700' :
@@ -396,6 +642,12 @@ const PuzzlePage = () => {
                 key={`${currentPuzzle}-${resetCounter}`}
                 position={puzzle.position}
                 orientation={orientation}
+                enableArrows
+                preserveDrawingsOnPositionChange={true}
+                onDrawChange={({ arrows, circles }) => {
+                  // Optional: could be used to offer "try this line" or hints
+                  // console.log('drawings', arrows, circles);
+                }}
                 onMove={({ from, to, san, fen }) => {
                   // Compare both SAN and UCI to handle Lichess dataset moves
                   const isUci = (s) => /^[a-h][1-8][a-h][1-8](?:[qrbn])?$/i.test(s || '');
@@ -506,7 +758,7 @@ const PuzzlePage = () => {
                     In your game, you played: <span className="font-semibold">{puzzle.playerMove}</span>
                   </div>
                 )}
-                {puzzle?.gameInfo && (
+                {puzzleType !== 'learn-mistakes' && puzzle?.gameInfo && (
                   <div className="text-xs text-blue-600 mb-2">
                     {puzzle.gameInfo}
                   </div>
@@ -547,13 +799,30 @@ const PuzzlePage = () => {
                 </div>
                 
                 {/* Action Buttons - Bottom Row */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-3">
                   <button
                     onClick={handleShowSolution}
                     className="px-4 py-3 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors text-sm font-semibold flex items-center justify-center shadow-md"
                   >
-                    <Eye size={16} className="mr-2" />
-                    Show Solution
+                    {showSolution ? (
+                      <>
+                        <EyeOff size={16} className="mr-2" />
+                        Hide Solution
+                      </>
+                    ) : (
+                      <>
+                        <Eye size={16} className="mr-2" />
+                        Show Solution
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={handleStepBack}
+                    disabled={!puzzle?.lineUci || (typeof puzzle?.lineIndex === 'number' ? puzzle.lineIndex : (typeof puzzle?.startLineIndex === 'number' ? puzzle.startLineIndex : 0)) <= (typeof puzzle?.startLineIndex === 'number' ? puzzle.startLineIndex : 0)}
+                    className="px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm font-semibold flex items-center justify-center shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Undo2 size={16} className="mr-2" />
+                    Step Back
                   </button>
                   <button
                     onClick={handleResetPuzzle}

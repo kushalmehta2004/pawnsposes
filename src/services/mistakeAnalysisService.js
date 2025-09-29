@@ -14,6 +14,46 @@ import {
   UserMistakeModel 
 } from '../utils/dataModels.js';
 
+// Helper: prioritize most valuable mistakes for storage/display
+// - Prefer missed wins/blunders, then higher centipawn loss, then most recent
+function prioritizeMistakes(mistakes = []) {
+  const severityRank = {
+    missed_win: 4,
+    blunder: 3,
+    mistake: 2,
+    inaccuracy: 1
+  };
+
+  // Deduplicate by position+solution+game context to avoid near-duplicates
+  const unique = [];
+  const seen = new Set();
+  for (const m of mistakes) {
+    const key = `${m.fen}|${m.correctMove}|${m.gameId}|${m.moveNumber}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(m);
+  }
+
+  // Sort by severity, cp loss, recency, then move number
+  unique.sort((a, b) => {
+    const sa = severityRank[a.mistakeType] || 0;
+    const sb = severityRank[b.mistakeType] || 0;
+    if (sb !== sa) return sb - sa;
+
+    const cpa = a.centipawnLoss || 0;
+    const cpb = b.centipawnLoss || 0;
+    if (cpb !== cpa) return cpb - cpa;
+
+    const da = new Date(a.lastOccurrence || 0).getTime();
+    const db = new Date(b.lastOccurrence || 0).getTime();
+    if (db !== da) return db - da;
+
+    return (b.moveNumber || 0) - (a.moveNumber || 0);
+  });
+
+  return unique;
+}
+
 class MistakeAnalysisService {
   constructor() {
     this.stockfish = stockfishAnalyzer; // Use the singleton instance
@@ -28,7 +68,8 @@ class MistakeAnalysisService {
       maxGames = 10,
       onProgress = () => {},
       analysisDepth = 18,
-      timeLimit = 5000
+      timeLimit = 5000,
+      maxMistakesToStore = null
     } = options;
 
     if (this.isAnalyzing) {
@@ -85,14 +126,17 @@ class MistakeAnalysisService {
           console.warn(`❌ Failed to analyze game ${game.gameId}:`, error.message);
         }
 
-        // Small delay between games
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Small delay between games (reduced for speed)
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
 
-      // Store all detected mistakes
+      // Store all detected mistakes (optionally capped)
       if (allMistakes.length > 0) {
-        await puzzleDataService.storeMistakes(allMistakes);
-        console.log(`💾 Stored ${allMistakes.length} mistakes in database`);
+        const mistakesToStore = Array.isArray(allMistakes)
+          ? (maxMistakesToStore ? prioritizeMistakes(allMistakes).slice(0, maxMistakesToStore) : allMistakes)
+          : allMistakes;
+        await puzzleDataService.storeMistakes(mistakesToStore);
+        console.log(`💾 Stored ${mistakesToStore.length} mistakes in database (found ${allMistakes.length})`);
       }
 
       // Generate mistake patterns
@@ -162,49 +206,61 @@ class MistakeAnalysisService {
     
     console.log(`📊 Selected ${positionsToAnalyze.length} key positions for analysis`);
 
-    for (let i = 0; i < positionsToAnalyze.length; i++) {
-      const position = positionsToAnalyze[i];
-      
-      onProgress({
-        moveNumber: position.moveNumber,
-        total: positionsToAnalyze.length,
-        current: i + 1
+    // Sort by priority (critical > high > medium) then by move order; cap to keep phase fast
+    const priorityOrder = { critical: 3, high: 2, medium: 1, low: 0 };
+    const sortedPositions = [...positionsToAnalyze].sort((a, b) => {
+      const pa = priorityOrder[a.priority] || 0;
+      const pb = priorityOrder[b.priority] || 0;
+      if (pb !== pa) return pb - pa;
+      return a.moveIndex - b.moveIndex;
+    });
+    const cappedPositions = sortedPositions.slice(0, 25);
+
+    // Build FEN payloads up-front; only include player's move positions (same behavior as before)
+    const fenPayloads = cappedPositions
+      .filter((pos) => this.isPlayerMove(pos.moveNumber, game.playerColor))
+      .map((pos) => {
+        chess.reset();
+        for (let j = 0; j < pos.moveIndex; j++) chess.move(moves[j]);
+        return {
+          fen: chess.fen(),
+          moveNumber: pos.moveNumber,
+          moveIndex: pos.moveIndex,
+          priority: pos.priority,
+          category: pos.phase
+        };
       });
 
-      try {
-        // Set up position
-        chess.reset();
-        for (let j = 0; j < position.moveIndex; j++) {
-          chess.move(moves[j]);
-        }
+    // Batch analyze with light concurrency (2 workers)
+    const analyzed = await this.stockfish.analyzePositions(fenPayloads, {
+      depth: analysisDepth,
+      timeLimit,
+      concurrency: 2,
+      onProgress: ({ current, total, position }) => {
+        onProgress({ moveNumber: position.moveNumber, current, total, progress: Math.round((current / Math.max(total, 1)) * 100) });
+      }
+    });
 
-        const currentFen = chess.fen();
-        const playerMove = moves[position.moveIndex];
-        const isPlayerMove = this.isPlayerMove(position.moveNumber, game.playerColor);
+    // Convert analysis results into mistakes
+    for (const result of analyzed) {
+      // Ensure we only consider player's move
+      if (!this.isPlayerMove(result.moveNumber, game.playerColor)) continue;
 
-        if (!isPlayerMove) continue; // Only analyze player's moves
+      const playerMove = moves[result.moveIndex];
+      const analysis = result?.stockfishAnalysis;
+      if (!analysis?.bestMove) continue;
 
-        // Get engine analysis for this position
-        const analysis = await this.stockfish.analyzePositionDeep(currentFen, analysisDepth, timeLimit);
-        
-        if (!analysis || !analysis.bestMove) continue;
+      const mistake = this.evaluateMove(
+        playerMove,
+        analysis,
+        result.fen,
+        game,
+        result.moveNumber
+      );
 
-        // Check if player move matches engine recommendation
-        const mistake = this.evaluateMove(
-          playerMove,
-          analysis,
-          currentFen,
-          game,
-          position.moveNumber
-        );
-
-        if (mistake) {
-          mistakes.push(mistake);
-          console.log(`❌ Mistake found: Move ${position.moveNumber} - ${mistake.mistakeType} (${mistake.centipawnLoss}cp)`);
-        }
-
-      } catch (error) {
-        console.warn(`Failed to analyze position ${position.moveNumber}:`, error.message);
+      if (mistake) {
+        mistakes.push(mistake);
+        console.log(`❌ Mistake found: Move ${result.moveNumber} - ${mistake.mistakeType} (${mistake.centipawnLoss}cp)`);
       }
     }
 

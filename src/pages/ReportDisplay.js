@@ -3,7 +3,15 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { BarChart3, AlertCircle, ArrowLeft, Download, Share2 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
-
+import puzzleGenerationService from '../services/puzzleGenerationService';
+import { initializePuzzleDatabase, getPuzzleDatabase } from '../utils/puzzleDatabase';
+import puzzleDataService from '../services/puzzleDataService';
+// Simple in-memory cache to persist report sections across route toggles (resets on reload)
+let REPORT_DISPLAY_CACHE = {
+  key: null,
+  performanceMetrics: null,
+  recurringWeaknesses: null,
+};
 const ReportDisplay = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -15,6 +23,47 @@ const ReportDisplay = () => {
   const [phaseReview, setPhaseReview] = useState(null);
   const [positionalStudy, setPositionalStudy] = useState(null);
   const [videoRec, setVideoRec] = useState(null);
+  const [isPrewarmingPuzzles, setIsPrewarmingPuzzles] = useState(false);
+
+  // Background pre-generation of puzzles for Fix My Weaknesses and Learn From My Mistakes
+  const prewarmUserPuzzles = async (analysisData) => {
+    try {
+      const username = analysisData?.username || analysisData?.rawAnalysis?.username || analysisData?.formData?.username;
+      if (!username || username === 'Unknown') return;
+
+      // Disable prewarm cache for fix-weaknesses; only prewarm learn-mistakes if desired
+      await initializePuzzleDatabase();
+      const db = getPuzzleDatabase();
+      const version = 'v3-fill20';
+      const keyFor = (type) => `pawnsposes:puzzles:${username}:${type}:${version}`;
+
+      const cachedLearn = await db.getSetting(keyFor('learn-mistakes'), null);
+
+      // Generate both sets; do not cache weaknesses
+      const [weakSet, learnSetRaw] = await Promise.all([
+        puzzleGenerationService.generateWeaknessPuzzles(username, { maxPuzzles: 20 }),
+        cachedLearn?.puzzles?.length ? Promise.resolve(cachedLearn.puzzles) : puzzleGenerationService.generateMistakePuzzles(username, { maxPuzzles: 20 })
+      ]);
+
+      // Make learn-mistakes distinct from fix-weaknesses
+      const tok = (s) => String(s || '').split(/\s+/).filter(Boolean);
+      const keyOf = (p) => `${p.position}::${tok(p.lineUci).slice(0, 6).join(' ')}`;
+      const weakKeys = new Set(Array.isArray(weakSet) ? weakSet.map(keyOf) : []);
+      const learnDistinct = Array.isArray(learnSetRaw) ? learnSetRaw.filter(p => !weakKeys.has(keyOf(p))) : [];
+
+      // Only cache learn-mistakes
+      if (!cachedLearn?.puzzles?.length) {
+        const metadata = {
+          title: 'Learn From My Mistakes',
+          subtitle: 'Puzzles from your mistakes',
+          description: 'Practice positions created from your own mistakes.'
+        };
+        await db.saveSetting(keyFor('learn-mistakes'), { puzzles: learnDistinct, metadata, savedAt: Date.now() });
+      }
+    } catch (e) {
+      console.warn('⚠️ Background puzzle prewarm failed (continuing without blocking):', e);
+    }
+  };
 
 
   const handleBackToReports = () => {
@@ -30,18 +79,40 @@ const ReportDisplay = () => {
     const analysisData = location.state?.analysis;
 
     if (!analysisData || !analysisData.rawAnalysis) {
-      navigate('/report-display');
+      // If no navigation state is present, try to restore from in-memory cache
+      if (REPORT_DISPLAY_CACHE.key) {
+        if (REPORT_DISPLAY_CACHE.performanceMetrics) setPerformanceMetrics(REPORT_DISPLAY_CACHE.performanceMetrics);
+        if (REPORT_DISPLAY_CACHE.recurringWeaknesses) setRecurringWeaknesses(REPORT_DISPLAY_CACHE.recurringWeaknesses);
+        return;
+      }
+      // Fallback: go back to reports to regenerate
+      navigate('/reports');
       return;
     }
 
     setAnalysis(analysisData);
 
-    // If coming back from FullReport, reuse already computed data
+        // Cache key based on user/report identity
+    const cacheKey = analysisData?.username || analysisData?.rawAnalysis?.username || analysisData?.formData?.username || 'unknown';
+
+    // Restore from in-memory cache first to avoid any flicker/refetch
+    if (REPORT_DISPLAY_CACHE.key === cacheKey) {
+      if (REPORT_DISPLAY_CACHE.performanceMetrics) {
+        setPerformanceMetrics(REPORT_DISPLAY_CACHE.performanceMetrics);
+      }
+      if (REPORT_DISPLAY_CACHE.recurringWeaknesses) {
+        setRecurringWeaknesses(REPORT_DISPLAY_CACHE.recurringWeaknesses);
+      }
+    }
+
+    // If coming back from FullReport or other route, prefer provided state and update cache
     if (location.state?.performanceMetrics) {
       setPerformanceMetrics(location.state.performanceMetrics);
+      REPORT_DISPLAY_CACHE = { ...REPORT_DISPLAY_CACHE, key: cacheKey, performanceMetrics: location.state.performanceMetrics };
     }
     if (location.state?.recurringWeaknesses) {
       setRecurringWeaknesses(location.state.recurringWeaknesses);
+      REPORT_DISPLAY_CACHE = { ...REPORT_DISPLAY_CACHE, key: cacheKey, recurringWeaknesses: location.state.recurringWeaknesses };
     }
     if (location.state?.phaseReview) {
       setPhaseReview(location.state.phaseReview);
@@ -52,12 +123,20 @@ const ReportDisplay = () => {
     if (location.state?.videoRec) {
       setVideoRec(location.state.videoRec);
     }
-
-    // Only calculate if nothing is available yet
-    if (analysisData && !performanceMetrics && !location.state?.performanceMetrics) {
+        // Only calculate if nothing is available yet (and not present in cache)
+    const hasMetrics = REPORT_DISPLAY_CACHE.key === cacheKey && !!REPORT_DISPLAY_CACHE.performanceMetrics;
+    const hasWeaknesses = REPORT_DISPLAY_CACHE.key === cacheKey && !!REPORT_DISPLAY_CACHE.recurringWeaknesses;
+    if (analysisData && (!hasMetrics || !hasWeaknesses) && !location.state?.performanceMetrics && !performanceMetrics) {
       calculatePerformanceMetrics(analysisData);
     }
-  }, [location.state?.analysis, location.state?.performanceMetrics, performanceMetrics, navigate]);
+  
+    // Kick off background puzzle pre-generation once per mount
+    if (!isPrewarmingPuzzles) {
+      setIsPrewarmingPuzzles(true);
+      // Fire-and-forget to avoid blocking UI. Errors are internally handled.
+      prewarmUserPuzzles(analysisData);
+    }
+  }, [location.state?.analysis, location.state?.performanceMetrics, performanceMetrics, navigate, isPrewarmingPuzzles]);
 
   // Calculate performance metrics: JavaScript for stats + Gemini for openings
   const calculatePerformanceMetrics = async (analysisData) => {
@@ -163,27 +242,79 @@ const ReportDisplay = () => {
       
 
       setPerformanceMetrics(finalMetrics);
-      
+            // Update in-memory cache for fast return navigation
+      REPORT_DISPLAY_CACHE = { ...REPORT_DISPLAY_CACHE, key: username || REPORT_DISPLAY_CACHE.key || 'unknown', performanceMetrics: finalMetrics };
       // ✅ UNIFIED: Use pre-calculated weaknesses from single Gemini call
       setIsCalculatingMetrics(false);
       
-      // 🔥 PRIORITY: Use deep analysis weaknesses if available, otherwise use unified analysis weaknesses
-      const stockfishAnalysis = analysisData.stockfishAnalysis;
-      const deepAnalysisWeaknesses = stockfishAnalysis?.recurringWeaknesses || [];
-      const unifiedWeaknesses = analysisData.recurringWeaknesses || [];
-      
-      // Prefer deep analysis weaknesses over unified analysis weaknesses
-      const finalWeaknesses = deepAnalysisWeaknesses.length > 0 ? deepAnalysisWeaknesses : unifiedWeaknesses;
-      
+      // Build dynamic recurring weaknesses using Gemini based on user's games
+      try {
+          setIsAnalyzingWeaknesses(true);
+        const playerInfo = {
+          username,
+          platform: analysisData.platform || analysisData.rawAnalysis?.platform || 'unknown',
+          averageRating: analysisData.averageRating || analysisData.rawAnalysis?.averageRating,
+          skillLevel: analysisData.skillLevel || analysisData.rawAnalysis?.skillLevel
+        };
+          let rw = [];
+        try {
+          const { generateFullReportSectionsFromGames } = await import('../utils/geminiStockfishAnalysis');
+          const sections = await generateFullReportSectionsFromGames(playerInfo, { totalGames: games.length }, { maxGames: 25 });
+          rw = Array.isArray(sections?.recurringWeaknesses) ? sections.recurringWeaknesses : [];
+        } catch (e) {
+          console.warn('⚠️ Gemini recurring weaknesses generation failed (fallback to existing):', e?.message || e);
+        
+        }
 
-      
-      if (deepAnalysisWeaknesses.length > 0) {
+        // Fallback to any precomputed weaknesses on analysisData if Gemini not available
+        const stockfishAnalysis = analysisData.stockfishAnalysis;
+        const deepAnalysisWeaknesses = stockfishAnalysis?.recurringWeaknesses || [];
+        const unifiedWeaknesses = analysisData.recurringWeaknesses || [];
+        // Enrich weaknesses with opponent info so FullReport can always render "vs. Opponent"
+        const gamesArr = games;
+        const safeStr = (v) => (v || '').toString();
+        const getNames = (g) => {
+          const white = g?.white?.username || g?.players?.white?.user?.name || g?.gameInfo?.white || (typeof g?.white === 'string' ? g.white : g?.white?.name);
+          const black = g?.black?.username || g?.players?.black?.user?.name || g?.gameInfo?.black || (typeof g?.black === 'string' ? g.black : g?.black?.name);
+          return { white, black };
+        };
+        const deriveOpponentFromGame = (g, username) => {
+          const { white, black } = getNames(g);
+          const u = safeStr(username).toLowerCase();
+          const w = safeStr(white).toLowerCase();
+          const b = safeStr(black).toLowerCase();
+          if (u && w && u === w) return black || g?.opponent || null;
+          if (u && b && u === b) return white || g?.opponent || null;
+          return g?.opponent || null;
+        };
+        const attachOpponents = (weaknesses) => Array.isArray(weaknesses)
+          ? weaknesses.map(w => {
+              const exs = Array.isArray(w.examples)
+                ? w.examples.map(ex => {
+                    const gn = Number(ex?.gameNumber);
+                    let g = null;
+                    if (Number.isFinite(gn)) {
+                      g = gamesArr.find(gm => Number(gm?.gameNumber) === gn) || gamesArr[gn - 1] || null;
+                    }
+                    const opp = g ? deriveOpponentFromGame(g, username) : null;
+                    return { ...ex, opponent: ex?.opponent || opp || undefined };
+                  })
+                : w.examples;
+              let opponentContext = w.opponentContext;
+              if (!opponentContext && Array.isArray(exs) && exs[0]?.opponent && exs[0]?.moveNumber) {
+                opponentContext = `vs. ${exs[0].opponent} (Move ${exs[0].moveNumber})`;
+              }
+              return { ...w, examples: exs, opponentContext };
+            })
+          : weaknesses;
 
-      } else if (unifiedWeaknesses.length > 0) {
-
+        const baseWeaknesses = rw.length > 0 ? rw : (deepAnalysisWeaknesses.length > 0 ? deepAnalysisWeaknesses : unifiedWeaknesses);
+        const enrichedWeaknesses = attachOpponents(baseWeaknesses);
+        setRecurringWeaknesses(enrichedWeaknesses);
+        REPORT_DISPLAY_CACHE = { ...REPORT_DISPLAY_CACHE, recurringWeaknesses: enrichedWeaknesses };
+      } finally {
+        setIsAnalyzingWeaknesses(false);
       }
-      
-      setRecurringWeaknesses(finalWeaknesses);
       
       // No need to set analyzing state since data is already available
       // console.log('✅ Weakness data ready - button enabled immediately');  // DISABLED - Noise reduction
@@ -1265,6 +1396,9 @@ REQUIREMENTS:
 - Reference SPECIFIC games and opponents from the data above
 - Provide CONCRETE examples with exact FEN positions and moves
 - Suggest better moves based on the positions shown
+- ENSURE DIVERSITY: Select examples from different move numbers (early, middle, late game) and both colors (white and black games)
+- AVOID REPETITION: Do not use the same move number or similar examples for different weaknesses
+ 
 
 RESPONSE FORMAT - EXACTLY 3 WEAKNESSES:
 
@@ -1294,11 +1428,11 @@ CRITICAL REQUIREMENTS:
 - Include the opponent's username from the actual game data
 - Base analysis on chess principles applied to the specific positions
 
-EXAMPLE FORMAT:
+EXAMPLE FORMAT(use real game data, not this example):
 **WEAKNESS_1: Premature Central Pawn Advances in Complex Positions**
 **SUBTITLE:** Consistently advancing central pawns too early, creating weaknesses and losing tempo.
-**GAME_INFO:** vs. chessmaster2024 (Move 12)
-**MISTAKE:** In the position rnbqkb1r/pppp1ppp/5n2/4p3/2B1P3/3P1N2/PPP2PPP/RNBQK2R w KQkq - 0 4, after playing d4, you opened the center prematurely while your king was still uncastled. Better Plan: Castle first with O-O to secure king safety before central action.
+**GAME_INFO:** vs. vs. [REAL opponent name] (Move [real move number])
+**MISTAKE:** In the position [REAL FEN from data], after playing [real move], [explain what went wrong based on position]. Better Plan: [better move] because [positional reason].
 **BETTER_PLAN:** Always prioritize king safety before launching central pawn storms. Complete development first, then advance pawns with proper support.
 
 ANALYZE THE FEN POSITIONS CAREFULLY AND FIND REAL CHESS MISTAKES!`;
@@ -3204,68 +3338,38 @@ Guidelines:
         </div>
 
         <div className="tabs">
-          <div className="tab active">Dashboard</div>
-          <div className="tab" style={{ color: 'var(--text-light-color)' }}>
-            Progress Report <span className="pro-tag">PRO</span>
-          </div>
-        </div>
+  <div className="tab active">Dashboard</div>
+  <div
+    className="tab"
+    style={{ color: 'var(--text-light-color)', cursor: isCalculatingMetrics ? 'not-allowed' : 'pointer' }}
+    onClick={() => {
+      if (isCalculatingMetrics) return;
+      const dataToPass = {
+        analysis,
+        performanceMetrics,
+        recurringWeaknesses: recurringWeaknesses,
+        engineInsights: analysis?.engineInsights,
+        improvementRecommendations: analysis?.improvementRecommendations,
+        personalizedResources: analysis?.personalizedResources,
+        isCalculatingMetrics,
+        isAnalyzingWeaknesses,
+        dataSource: 'Reports.js - Unified Single Gemini Call'
+      };
+      navigate('/full-report', { state: dataToPass });
+    }}
+    aria-disabled={isCalculatingMetrics}
+    title={isCalculatingMetrics ? 'Calculating Metrics...' : 'Open Full Report'}
+  >
+    Progress Report <span className="pro-tag">PRO</span>
+  </div>
+</div>
+
 
         <div className="dashboard-content">
           <div className="dashboard-panel">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <h3>Your AI Diagnosis</h3>
-              <button
-                onClick={() => {
-                  // console.log('=== NAVIGATING TO FULL REPORT ===');  // DISABLED - Noise reduction
-                  // console.log('analysis:', analysis ? 'Present' : 'Missing');  // DISABLED - Noise reduction
-                  // console.log('performanceMetrics:', performanceMetrics ? 'Present' : 'Missing');  // DISABLED - Noise reduction
-                  // console.log('recurringWeaknesses (from unified analysis):', recurringWeaknesses);  // DISABLED - Noise reduction
-                  // console.log('recurringWeaknesses length:', Array.isArray(recurringWeaknesses) ? recurringWeaknesses.length : 'Not array');  // DISABLED - Noise reduction
-                  // console.log('recurringWeaknesses source: UNIFIED Reports.js single call');  // DISABLED - Noise reduction
-                  // console.log('isCalculatingMetrics:', isCalculatingMetrics);  // DISABLED - Noise reduction
-                  // console.log('isAnalyzingWeaknesses:', isAnalyzingWeaknesses);  // DISABLED - Noise reduction
-                  
-                  // ✅ UNIFIED: Pass pre-calculated data from single Gemini call
-                  const dataToPass = {
-                    analysis, 
-                    performanceMetrics, 
-                    recurringWeaknesses: recurringWeaknesses, // This is from the unified Gemini call in Reports.js
-                    engineInsights: analysis?.engineInsights, // 🔥 Deep analysis engine insights
-                    improvementRecommendations: analysis?.improvementRecommendations, // 🔥 Deep analysis improvement recommendations
-                    personalizedResources: analysis?.personalizedResources, // Add personalized resources from Gemini
-                    isCalculatingMetrics,
-                    isAnalyzingWeaknesses,
-                    dataSource: 'Reports.js - Unified Single Gemini Call' // Updated debug marker
-                  };
-                  
-                  // console.log('Data being passed to Full Report:', dataToPass);  // DISABLED - Noise reduction
-                  
-                  navigate('/full-report', { state: dataToPass });
-                }}
-                disabled={isCalculatingMetrics} // ✅ UNIFIED: No longer need isAnalyzingWeaknesses since data is pre-calculated
-                style={{
-                  padding: '0.5rem 1rem',
-                  border: `1px solid ${isCalculatingMetrics ? '#ccc' : 'var(--primary-color)'}`,
-                  backgroundColor: isCalculatingMetrics ? '#f5f5f5' : 'white',
-                  color: isCalculatingMetrics ? '#999' : 'var(--primary-color)',
-                  borderRadius: '6px',
-                  fontSize: '0.875rem',
-                  fontWeight: '600',
-                  cursor: isCalculatingMetrics ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.2s',
-                  opacity: isCalculatingMetrics ? 0.6 : 1
-                }}
-                onMouseOver={(e) => {
-                  e.target.style.backgroundColor = 'var(--primary-color)';
-                  e.target.style.color = 'white';
-                }}
-                onMouseOut={(e) => {
-                  e.target.style.backgroundColor = 'white';
-                  e.target.style.color = 'var(--primary-color)';
-                }}
-              >
-                {isCalculatingMetrics ? 'Calculating Metrics...' : 'Full Report'}
-              </button>
+              
             </div>
             
             {/* Dynamic AI Diagnosis */}

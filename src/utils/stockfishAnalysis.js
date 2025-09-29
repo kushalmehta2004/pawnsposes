@@ -5,7 +5,9 @@
 
 // Stockfish Web Worker wrapper for position analysis
 class StockfishAnalyzer {
-  constructor() {
+  constructor(config = {}) {
+    // Allow overriding engine settings per instance (for concurrency)
+    this.config = { hash: 16, ...config };
     this.worker = null;
     this.isReady = false;
     this.analysisQueue = [];
@@ -35,6 +37,16 @@ class StockfishAnalyzer {
         this.worker.onmessage = (e) => {
           const message = e.data;
           if (message === 'uciok') {
+            // After UCI init, configure engine performance options
+            const cores = Math.max(1, (navigator.hardwareConcurrency || 2));
+            // If a per-instance threads override is passed, use it; otherwise keep within 1..4
+            const threads = Math.min(4, Math.max(1, this.config.threads || cores));
+            const hash = Math.max(1, this.config.hash || 16);
+            try {
+              this.worker.postMessage(`setoption name Threads value ${threads}`);
+              this.worker.postMessage(`setoption name Hash value ${hash}`);
+              this.worker.postMessage('isready');
+            } catch (_) {}
             clearTimeout(timeout);
             this.isReady = true;
             console.log('Stockfish initialized successfully');
@@ -206,15 +218,18 @@ class StockfishAnalyzer {
       timeLimit = 5000, // Increased time limit for deeper analysis
       onProgress = () => {},
       maxPositions = fenPositions.length,
-      prioritizeKeyPositions = true
+      prioritizeKeyPositions = true,
+      concurrency = 1 // NEW: light concurrency support
     } = options;
 
     // Ensure minimum depth for production analysis
     const actualDepth = Math.max(depth, 18);
     const actualMaxPositions = Math.min(fenPositions.length, maxPositions);
+    const poolSize = Math.max(1, Math.min(2, concurrency));
     
     console.log(`🎯 Starting deep Stockfish analysis (depth ${actualDepth})...`);
     console.log(`📊 Analyzing ${actualMaxPositions} key positions from ${fenPositions.length} total`);
+    console.log(`🧵 Concurrency: ${poolSize}`);
     
     // Prioritize positions by importance if they have priority/category data
     let positionsToAnalyze = fenPositions.slice(0, actualMaxPositions);
@@ -224,22 +239,28 @@ class StockfishAnalyzer {
     
     const results = [];
     const startTime = Date.now();
-    
-    for (let i = 0; i < positionsToAnalyze.length; i++) {
-      const position = positionsToAnalyze[i];
-      
+
+    // Sequential path (existing behavior)
+    const runSequential = async () => {
+      for (let i = 0; i < positionsToAnalyze.length; i++) {
+        const position = positionsToAnalyze[i];
+        await analyzeOne(i, position);
+      }
+    };
+
+    // Helper to analyze one position and push result
+    const analyzeOne = async (index, position) => {
       try {
         onProgress({
-          current: i + 1,
+          current: index + 1,
           total: positionsToAnalyze.length,
           position: position,
           stage: 'deep_analysis',
           message: `Deep analysis: Move ${position.moveNumber} (${position.category || 'position'})`
         });
 
-        // Use deep analysis for all positions
         const analysis = await this.analyzePositionDeep(position.fen, actualDepth, timeLimit);
-        
+
         const enhancedResult = {
           ...position,
           stockfishAnalysis: analysis,
@@ -251,22 +272,17 @@ class StockfishAnalyzer {
             analysisTimestamp: new Date().toISOString()
           }
         };
-        
-        results.push(enhancedResult);
-        
-        // Log progress for every 10th position or last position  
-        if (i % 10 === 0 || i === positionsToAnalyze.length - 1) {
-          const avgQuality = results.reduce((sum, r) => sum + (r.analysisMetadata?.analysisQuality || 0), 0) / results.length;
-          console.log(`📊 Deep analysis progress: ${i + 1}/${positionsToAnalyze.length} | Quality: ${avgQuality.toFixed(1)}/100`);
+
+        results[index] = enhancedResult;
+
+        if (index % 10 === 0 || index === positionsToAnalyze.length - 1) {
+          const done = results.filter(Boolean);
+          const avgQuality = done.length ? done.reduce((sum, r) => sum + (r.analysisMetadata?.analysisQuality || 0), 0) / done.length : 0;
+          console.log(`📊 Deep analysis progress: ${index + 1}/${positionsToAnalyze.length} | Quality: ${avgQuality.toFixed(1)}/100`);
         }
-        
-        // Adaptive delay based on position importance
-        const delay = position.priority === 'critical' ? 200 : 100;
-        await new Promise(resolve => setTimeout(resolve, delay));
-        
       } catch (error) {
-        console.warn(`❌ Failed to analyze position ${i + 1} (Move ${position.moveNumber}):`, error.message);
-        results.push({
+        console.warn(`❌ Failed to analyze position ${index + 1} (Move ${position.moveNumber}):`, error.message);
+        results[index] = {
           ...position,
           stockfishAnalysis: null,
           analysisError: error.message,
@@ -274,20 +290,80 @@ class StockfishAnalyzer {
             analysisTimestamp: new Date().toISOString(),
             failed: true
           }
-        });
+        };
       }
+    };
+
+    if (poolSize === 1) {
+      await runSequential();
+    } else {
+      // Light concurrency pool (size 2)
+      const total = positionsToAnalyze.length;
+
+      // Create a second lightweight analyzer instance with adjusted threads
+      const cores = Math.max(1, (navigator.hardwareConcurrency || 2));
+      const perWorkerThreads = Math.max(1, Math.floor(Math.min(4, cores) / poolSize));
+
+      // Lazy import class to spawn a sibling instance
+      const { StockfishAnalyzer } = await import('./stockfishAnalysis');
+      const sibling = new StockfishAnalyzer({ threads: perWorkerThreads, hash: this.config?.hash || 16 });
+      await sibling.initialize();
+
+      // Current instance: also adjust threads to avoid oversubscription
+      this.config.threads = perWorkerThreads;
+
+      // Pointer that dispatches next index atomically
+      let next = 0;
+      const getNext = () => (next < total ? next++ : -1);
+
+      // Worker loop for an analyzer
+      const workerLoop = async (analyzer, label) => {
+        for (;;) {
+          const i = getNext();
+          if (i === -1) break;
+          const position = positionsToAnalyze[i];
+          try {
+            onProgress({ current: i + 1, total, position, stage: 'deep_analysis', message: `(${label}) Move ${position.moveNumber}` });
+            const analysis = await analyzer.analyzePositionDeep(position.fen, actualDepth, timeLimit);
+            results[i] = {
+              ...position,
+              stockfishAnalysis: analysis,
+              analysisMetadata: {
+                analysisDepth: analysis.analysisDepth,
+                analysisQuality: analysis.analysisQuality,
+                nodeCount: analysis.nodeCount,
+                timeSpent: analysis.timeSpent,
+                analysisTimestamp: new Date().toISOString(),
+                worker: label
+              }
+            };
+          } catch (error) {
+            results[i] = { ...position, stockfishAnalysis: null, analysisError: error.message, analysisMetadata: { analysisTimestamp: new Date().toISOString(), failed: true, worker: label } };
+          }
+        }
+      };
+
+      // Start both loops in parallel
+      await Promise.all([
+        workerLoop(this, 'A'),
+        workerLoop(sibling, 'B')
+      ]);
+
+      // Cleanup sibling worker
+      sibling.terminate();
     }
 
     const totalTime = (Date.now() - startTime) / 1000;
-    const avgQuality = results.reduce((sum, r) => sum + (r.analysisMetadata?.analysisQuality || 0), 0) / results.length;
-    const successRate = (results.filter(r => r.stockfishAnalysis).length / results.length) * 100;
-    
+    const done = results.filter(Boolean);
+    const avgQuality = done.length ? done.reduce((sum, r) => sum + (r.analysisMetadata?.analysisQuality || 0), 0) / done.length : 0;
+    const successRate = (done.filter(r => r.stockfishAnalysis).length / done.length) * 100;
+
     console.log(`✅ Deep Stockfish analysis complete:`);
-    console.log(`   📊 ${results.length} positions analyzed in ${totalTime.toFixed(1)}s`);
+    console.log(`   📊 ${done.length} positions analyzed in ${totalTime.toFixed(1)}s`);
     console.log(`   🎯 Average analysis quality: ${avgQuality.toFixed(1)}/100`);
     console.log(`   ✅ Success rate: ${successRate.toFixed(1)}%`);
     console.log(`   🔍 Analysis depth: ${actualDepth} moves`);
-    
+
     return results;
   }
 
@@ -536,25 +612,27 @@ const getUserColor = (position, userInfo) => {
   
   const { username, platform } = userInfo;
   const gameInfo = position.gameInfo;
+  const usernameLower = String(username).toLowerCase();
   
   // For Chess.com games
   if (platform === 'chess.com') {
     const whitePlayer = gameInfo.white?.username?.toLowerCase();
     const blackPlayer = gameInfo.black?.username?.toLowerCase();
-    const usernameLower = username.toLowerCase();
-    
     if (whitePlayer === usernameLower) return 'white';
     if (blackPlayer === usernameLower) return 'black';
   }
   
   // For Lichess games
   if (platform === 'lichess') {
-    const whitePlayer = gameInfo.players?.white?.user?.id?.toLowerCase();
-    const blackPlayer = gameInfo.players?.black?.user?.id?.toLowerCase();
-    const usernameLower = username.toLowerCase();
-    
-    if (whitePlayer === usernameLower) return 'white';
-    if (blackPlayer === usernameLower) return 'black';
+    const whiteId = gameInfo.players?.white?.user?.id?.toLowerCase();
+    const blackId = gameInfo.players?.black?.user?.id?.toLowerCase();
+    const whiteName = gameInfo.players?.white?.user?.name?.toLowerCase();
+    const blackName = gameInfo.players?.black?.user?.name?.toLowerCase();
+
+    const whiteMatch = (whiteId && whiteId === usernameLower) || (whiteName && whiteName === usernameLower);
+    const blackMatch = (blackId && blackId === usernameLower) || (blackName && blackName === usernameLower);
+    if (whiteMatch) return 'white';
+    if (blackMatch) return 'black';
   }
   
   return null;
