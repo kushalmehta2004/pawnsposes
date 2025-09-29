@@ -25,7 +25,41 @@ const generateReportTitle = (analysis) => {
 };
 
 /**
- * Saves a complete chess analysis report to Supabase
+ * Optimizes analysis data by removing large game details and keeping only essential info
+ * @param {Object} analysis - Raw analysis data
+ * @returns {Object} - Optimized analysis data
+ */
+const optimizeAnalysisData = (analysis) => {
+  if (!analysis) return null;
+  
+  // Create a lightweight version of games data
+  const optimizedGames = (analysis.games || analysis.gameData || []).map(game => ({
+    id: game.id,
+    result: game.result,
+    rating: game.rating,
+    opponent_rating: game.opponent_rating,
+    time_control: game.time_control,
+    opening: game.opening,
+    accuracy: game.accuracy,
+    blunders: game.blunders,
+    mistakes: game.mistakes,
+    inaccuracies: game.inaccuracies,
+    // Remove heavy data like moves, analysis, pgn
+  }));
+
+  return {
+    ...analysis,
+    games: optimizedGames,
+    gameData: optimizedGames,
+    // Remove any other potentially large arrays/objects
+    detailedMoves: undefined,
+    fullPgn: undefined,
+    engineAnalysis: undefined
+  };
+};
+
+/**
+ * Saves a complete chess analysis report to Supabase with optimizations
  * @param {Object} reportData - Complete report data from FullReport
  * @param {string} userId - User ID from auth
  * @returns {Promise<Object>} - Saved report with ID
@@ -44,22 +78,17 @@ export const saveReport = async (reportData, userId) => {
     // Generate auto title
     const title = generateReportTitle(analysis);
     
-    // Extract key metadata with debugging
-    console.log('🔍 Analysis structure for platform extraction:', {
-      'analysis.formData': analysis?.formData,
-      'analysis.platform': analysis?.platform,
-      'analysis keys': Object.keys(analysis || {}),
-      'analysis.player': analysis?.player,
-      'analysis.username': analysis?.username
-    });
-    
+    // Extract key metadata
     const username = analysis?.username || analysis?.formData?.username || analysis?.player?.username;
-    const platform = analysis?.formData?.platform || analysis?.platform || analysis?.player?.platform || 'lichess'; // fallback to lichess
+    const platform = analysis?.formData?.platform || analysis?.platform || analysis?.player?.platform || 'lichess';
     const gameCount = analysis?.games?.length || analysis?.gameData?.length || 0;
     
-    console.log('📊 Extracted metadata:', { username, platform, gameCount });
+    console.log('📊 Saving report:', { username, platform, gameCount, title });
     
-    // Prepare report payload
+    // Optimize the analysis data to reduce size
+    const optimizedAnalysis = optimizeAnalysisData(analysis);
+    
+    // Prepare optimized report payload
     const reportPayload = {
       user_id: userId,
       title,
@@ -68,14 +97,14 @@ export const saveReport = async (reportData, userId) => {
       game_count: gameCount,
       created_at: new Date().toISOString(),
       
-      // Store complete analysis data
+      // Store optimized analysis data
       analysis_data: {
-        analysis,
+        analysis: optimizedAnalysis,
         performanceMetrics,
-        recurringWeaknesses,
-        engineInsights,
-        improvementRecommendations,
-        personalizedResources
+        recurringWeaknesses: recurringWeaknesses?.slice(0, 10), // Limit to top 10 weaknesses
+        engineInsights: engineInsights?.slice(0, 20), // Limit insights
+        improvementRecommendations: improvementRecommendations?.slice(0, 15), // Limit recommendations
+        personalizedResources: personalizedResources?.slice(0, 10) // Limit resources
       },
       
       // Extract summary metrics for quick access
@@ -88,6 +117,35 @@ export const saveReport = async (reportData, userId) => {
       }
     };
 
+    // Log payload size for debugging
+    const payloadSize = JSON.stringify(reportPayload).length;
+    console.log(`📦 Report payload size: ${(payloadSize / 1024 / 1024).toFixed(2)} MB`);
+    
+    // If payload is too large, create an even more minimal version
+    if (payloadSize > 10 * 1024 * 1024) { // 10MB limit
+      console.warn('⚠️ Payload is large, creating minimal version');
+      
+      // Create ultra-minimal version for very large reports
+      reportPayload.analysis_data = {
+        analysis: {
+          username: optimizedAnalysis?.username,
+          platform: optimizedAnalysis?.platform,
+          gameCount: gameCount,
+          // Keep only summary stats, remove individual games
+          overallStats: optimizedAnalysis?.overallStats,
+          skillLevel: optimizedAnalysis?.skillLevel
+        },
+        performanceMetrics,
+        recurringWeaknesses: recurringWeaknesses?.slice(0, 5), // Even fewer weaknesses
+        engineInsights: engineInsights?.slice(0, 10), // Even fewer insights
+        improvementRecommendations: improvementRecommendations?.slice(0, 8),
+        personalizedResources: personalizedResources?.slice(0, 5)
+      };
+      
+      const newSize = JSON.stringify(reportPayload).length;
+      console.log(`📦 Reduced payload size: ${(newSize / 1024 / 1024).toFixed(2)} MB`);
+    }
+
     const { data, error } = await supabase
       .from('reports')
       .insert([reportPayload])
@@ -96,6 +154,12 @@ export const saveReport = async (reportData, userId) => {
 
     if (error) {
       console.error('Error saving report:', error);
+      
+      // Handle specific timeout errors
+      if (error.code === '57014' || error.message?.includes('timeout')) {
+        throw new Error('Report is too large to save. Please try analyzing fewer games.');
+      }
+      
       throw new Error(`Failed to save report: ${error.message}`);
     }
 
@@ -104,6 +168,12 @@ export const saveReport = async (reportData, userId) => {
 
   } catch (error) {
     console.error('Error in saveReport:', error);
+    
+    // Provide more helpful error messages
+    if (error.message?.includes('timeout')) {
+      throw new Error('The report is too large and timed out while saving. Try analyzing fewer games or contact support.');
+    }
+    
     throw error;
   }
 };

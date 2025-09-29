@@ -34,6 +34,13 @@ Desktop.ini
 
 # Cache
 .cache/
-.parcel-cache/lichess_db_puzzle.csv
+.parcel-cache/
 
+# Large data files
 lichess_db_puzzle.csv
+*.csv
+*.db
+*.sqlite
+*.sqlite3
+data/
+datasets/

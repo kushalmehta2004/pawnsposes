@@ -190,9 +190,24 @@ const FullReport = () => {
         } catch (error) {
           console.error('❌ Failed to auto-save report:', error);
           console.error('❌ Error details:', error.message);
-          // Show error toast for debugging
-          toast.error(`Failed to save report: ${error.message}`, {
-            duration: 5000,
+          
+          // Show user-friendly error messages
+          let errorMessage = 'Failed to save report';
+          
+          if (error.message?.includes('timeout')) {
+            errorMessage = 'Report is too large to save. Try analyzing fewer games.';
+          } else if (error.message?.includes('too large')) {
+            errorMessage = 'Report data is too large. Please try with fewer games.';
+          } else if (error.message?.includes('403')) {
+            errorMessage = 'Permission denied. Please check your login status.';
+          } else if (error.message?.includes('500')) {
+            errorMessage = 'Server error. Please try again later.';
+          } else {
+            errorMessage = `Save failed: ${error.message}`;
+          }
+          
+          toast.error(errorMessage, {
+            duration: 7000,
             icon: '❌'
           });
         }
@@ -226,6 +241,62 @@ const FullReport = () => {
         actionPlan,
       } 
     });
+  };
+
+  const handleManualSave = async () => {
+    if (!user) {
+      toast.error('Please log in to save reports', { icon: '🔒' });
+      return;
+    }
+
+    if (reportSaved) {
+      toast.info('Report already saved!', { icon: '✅' });
+      return;
+    }
+
+    try {
+      const reportData = {
+        analysis,
+        performanceMetrics,
+        recurringWeaknesses,
+        engineInsights,
+        improvementRecommendations,
+        personalizedResources
+      };
+
+      toast.loading('Saving report...', { id: 'manual-save' });
+      
+      const savedReport = await reportService.saveReport(reportData, user.id);
+      setReportSaved(true);
+      
+      toast.success('Report saved successfully!', { 
+        id: 'manual-save',
+        icon: '💾',
+        duration: 3000 
+      });
+      
+      console.log('✅ Manual save successful:', savedReport.id);
+      
+    } catch (error) {
+      console.error('❌ Manual save failed:', error);
+      
+      let errorMessage = 'Failed to save report';
+      if (error.message?.includes('timeout')) {
+        errorMessage = 'Report is too large. Try analyzing fewer games.';
+      } else if (error.message?.includes('too large')) {
+        errorMessage = 'Report data is too large. Please try with fewer games.';
+      } else if (error.message?.includes('403')) {
+        errorMessage = 'Permission denied. Please check your login status.';
+      } else if (error.message?.includes('500')) {
+        errorMessage = 'Server error. Please try again later.';
+      }
+      
+      toast.error(errorMessage, { 
+        id: 'manual-save',
+        duration: 7000,
+        icon: '❌' 
+      });
+    }
   };
 
   const handleDownloadPDF = () => {
@@ -681,6 +752,16 @@ const FullReport = () => {
 
       <div className="page-container">
         <div className="print-button-container">
+          {user && !reportSaved && (
+            <button onClick={handleManualSave} className="print-button no-print" style={{ marginRight: '1rem', backgroundColor: '#059669' }}>
+              <i className="fas fa-save" style={{ marginRight: '0.5rem' }}></i>Save Report
+            </button>
+          )}
+          {user && reportSaved && (
+            <button disabled className="print-button no-print" style={{ marginRight: '1rem', backgroundColor: '#10b981', opacity: 0.7 }}>
+              <i className="fas fa-check" style={{ marginRight: '0.5rem' }}></i>Saved
+            </button>
+          )}
           <button onClick={handleDownloadPDF} className="print-button no-print">
             <i className="fas fa-download" style={{ marginRight: '0.5rem' }}></i>Download PDF
           </button>
