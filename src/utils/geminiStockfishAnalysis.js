@@ -201,9 +201,11 @@ Remember: The engine doesn't lie. These evaluations show exactly where improveme
 
 // Call Gemini API for recurring weaknesses — Gemini-only, one example per weakness
 export const explainStockfishFindings = async (_mistakes, playerInfo, gameContext) => {
+  console.log('🎯 explainStockfishFindings called - starting Gemini analysis');
   // Always use full-games Gemini flow for recurring weaknesses
   const result = await generateReportFromGeminiFullGames(playerInfo, gameContext);
   if (!result) throw new Error('Gemini full-games analysis failed');
+  console.log('✅ explainStockfishFindings completed, returning weaknesses');
   return result.geminiFullReport.recurringWeaknessesSection;
 };
 
@@ -1348,10 +1350,15 @@ Context:
 
 // ================= New: Full-game Gemini-driven report (no Stockfish example picking) =================
 export const generateReportFromGeminiFullGames = async (playerInfo, gameContext, options = {}) => {
+  console.log('🚀 generateReportFromGeminiFullGames called with:', { playerInfo, gameContext, options });
+  
   const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
   if (!apiKey || apiKey === 'your_gemini_api_key_here') {
+    console.error('❌ Gemini API key not configured');
     throw new Error('Gemini API key not configured. Please add your API key to the .env file.');
   }
+  
+  console.log('✅ Gemini API key found, proceeding with analysis');
 
   const { username, platform, averageRating, skillLevel } = playerInfo || {};
 
@@ -1478,9 +1485,18 @@ export const generateReportFromGeminiFullGames = async (playerInfo, gameContext,
 `  \"engineInsights\": string,\n` +
 `  \"improvementRecommendations\": string\n` +
 `}\n\n` +
+`CRITICAL REQUIREMENTS FOR GAME DIVERSITY:\n` +
+`- You MUST use examples from DIFFERENT games for each weakness.\n` +
+`- Weakness 1 should use examples from games A, B, C\n` +
+`- Weakness 2 should use examples from games D, E, F (NOT A, B, or C)\n` +
+`- Weakness 3 should use examples from games G, H, I (NOT A, B, C, D, E, or F)\n` +
+`- If you don't have enough games, use fewer examples per weakness rather than repeating games.\n` +
+`- NEVER use the same gameNumber for examples in different weaknesses.\n\n` +
 `Guidelines:\n` +
 `- Produce exactly 3 recurringWeaknesses.\n` +
 `- All example moves must be from move 16 or later (moveNumber >= 16). Prefer mid/late-game moments typical for ~1800 level play.\n` +
+`- CRITICAL: All examples must show moves played by ${safeName} (the user), NOT the opponent. Focus on the user's mistakes or suboptimal decisions.\n` +
+`- For each weakness, provide 2-3 examples from different games when possible.\n` +
 `- Use only the provided data (games, moves, FENs if present). If FEN is missing, you may omit it in examples or derive from move context if clearly possible.\n` +
 `- Keep justifications and better plans concise and practical.\n` +
 `- No extra prose outside JSON.\n\n` +
@@ -1527,22 +1543,52 @@ export const generateReportFromGeminiFullGames = async (playerInfo, gameContext,
   const getUserMoveAt = (gnum, moveNumber) => {
     const gi = gameIndex.get(gnum);
     if (!gi || !gi.playerColor) return null;
+    
+    // Find the move entry for the user at the specified move number
     const entry = gi.entries.find(e => e.fullmove === Number(moveNumber) && e.color === gi.playerColor);
+    
+    // If not found, also try looking for half-moves (in case moveNumber refers to half-moves)
+    if (!entry) {
+      // For debugging: log available moves for this game
+      console.log(`Debug: Game ${gnum}, looking for move ${moveNumber}, player color: ${gi.playerColor}`);
+      console.log(`Available moves:`, gi.entries.map(e => `${e.fullmove}${e.color === 'white' ? '' : '...'} ${e.san}`));
+    }
+    
     return entry || null;
   };
 
-  const groundExamples = (w) => {
+  const groundExamples = (w, usedGames = new Set()) => {
+    console.log(`\n=== Grounding examples for weakness: "${w.title}" ===`);
+    console.log(`Used games so far:`, Array.from(usedGames));
+    
     const raw = Array.isArray(w.examples) ? w.examples : [];
+    console.log(`Raw examples from Gemini:`, raw.map(ex => `Game ${ex.gameNumber}, Move ${ex.moveNumber}`));
+    
     const filtered = raw.filter(ex => Number(ex?.moveNumber) >= 16);
     const src = filtered.length ? filtered : raw;
     const out = [];
 
+    // First pass: prioritize examples from unused games with valid user moves
+    console.log(`\n--- First pass: Looking for unused games with valid user moves ---`);
     for (const ex of src) {
       const gnum = Number(ex?.gameNumber);
       const mv = Number(ex?.moveNumber);
-      if (!gnum || !mv) continue;
+      
+      console.log(`Checking example: Game ${gnum}, Move ${mv}`);
+      
+      if (!gnum || !mv) {
+        console.log(`  -> Skipped: Invalid game number or move number`);
+        continue;
+      }
+      
+      if (usedGames.has(gnum)) {
+        console.log(`  -> Skipped: Game ${gnum} already used`);
+        continue;
+      }
+      
       const userMove = getUserMoveAt(gnum, mv);
       if (userMove) {
+        console.log(`  -> ✓ Valid user move found: ${userMove.san}`);
         out.push({
           gameNumber: gnum,
           moveNumber: mv,
@@ -1550,52 +1596,89 @@ export const generateReportFromGeminiFullGames = async (playerInfo, gameContext,
           fen: ex.fen || userMove.fenAfter,
           justification: ex.justification || '',
           betterPlan: ex.betterPlan || '',
-          betterMove: ex.betterMove || ''
+          betterMove: ex.betterMove || '',
+          playerColor: gameIndex.get(gnum)?.playerColor || 'unknown'
         });
-        continue;
-      }
-      // Fallback to stored mistakes from the same game
-      const mistakes = mistakesByGameNumber.get(gnum) || [];
-      const m = mistakes.find(mm => Number(mm.moveNumber) >= 16);
-      if (m) {
-        out.push({
-          gameNumber: gnum,
-          moveNumber: m.moveNumber,
-          played: m.playerMove,
-          fen: m.fen,
-          justification: w.description ? w.description.slice(0, 120) : 'From user mistake record',
-          betterPlan: '',
-          betterMove: m.correctMove
-        });
+        usedGames.add(gnum); // Mark this game as used
+        console.log(`  -> Game ${gnum} marked as used. Used games now:`, Array.from(usedGames));
+        if (out.length >= 3) break; // Limit to 3 examples per weakness
+      } else {
+        console.log(`  -> Skipped: No valid user move found at Game ${gnum}, Move ${mv}`);
       }
     }
 
-    // If we still have no valid examples, synthesize 1-2 from mistakes across games
+    // Second pass: if we need more examples, use mistakes from unused games
+    console.log(`\n--- Second pass: Looking for mistakes from unused games (current count: ${out.length}) ---`);
+    if (out.length < 2) {
+      for (const [gnum, mistakes] of mistakesByGameNumber.entries()) {
+        if (usedGames.has(gnum)) {
+          console.log(`  -> Skipped Game ${gnum}: already used`);
+          continue;
+        }
+        
+        const m = mistakes.find(mm => Number(mm.moveNumber) >= 16);
+        if (m) {
+          console.log(`  -> ✓ Found mistake in Game ${gnum}, Move ${m.moveNumber}: ${m.playerMove}`);
+          out.push({
+            gameNumber: gnum,
+            moveNumber: m.moveNumber,
+            played: m.playerMove,
+            fen: m.fen,
+            justification: w.description ? w.description.slice(0, 120) : 'From user mistake record',
+            betterPlan: '',
+            betterMove: m.correctMove,
+            playerColor: gameIndex.get(gnum)?.playerColor || 'unknown'
+          });
+          usedGames.add(gnum);
+          console.log(`  -> Game ${gnum} marked as used. Used games now:`, Array.from(usedGames));
+          if (out.length >= 3) break;
+        }
+      }
+    }
+
+    // Third pass: if still no examples, allow reuse but prioritize user moves
+    console.log(`\n--- Third pass: Fallback with game reuse if needed (current count: ${out.length}) ---`);
     if (out.length === 0) {
-      for (const [gnum, arr] of mistakesByGameNumber.entries()) {
-        const m = arr.find(mm => Number(mm.moveNumber) >= 16);
-        if (!m) continue;
-        out.push({
-          gameNumber: gnum,
-          moveNumber: m.moveNumber,
-          played: m.playerMove,
-          fen: m.fen,
-          justification: 'From user mistake record',
-          betterPlan: '',
-          betterMove: m.correctMove
-        });
-        if (out.length >= 2) break;
+      for (const ex of src) {
+        const gnum = Number(ex?.gameNumber);
+        const mv = Number(ex?.moveNumber);
+        if (!gnum || !mv) continue;
+        
+        const userMove = getUserMoveAt(gnum, mv);
+        if (userMove) {
+          console.log(`  -> ✓ Fallback: Using Game ${gnum}, Move ${mv}: ${userMove.san}`);
+          out.push({
+            gameNumber: gnum,
+            moveNumber: mv,
+            played: userMove.san,
+            fen: ex.fen || userMove.fenAfter,
+            justification: ex.justification || '',
+            betterPlan: ex.betterPlan || '',
+            betterMove: ex.betterMove || '',
+            playerColor: gameIndex.get(gnum)?.playerColor || 'unknown'
+          });
+          if (out.length >= 2) break;
+        }
       }
     }
 
-    // Ensure uniqueness by game:move
+    // Ensure uniqueness by game:move and validate user moves
     const seen = new Set();
     const uniq = out.filter(ex => {
       const key = `${ex.gameNumber}:${ex.moveNumber}`;
       if (seen.has(key)) return false;
       seen.add(key);
-      return true;
+      
+      // Validate that this is actually a user move
+      const userMove = getUserMoveAt(ex.gameNumber, ex.moveNumber);
+      return userMove !== null;
     });
+
+    console.log(`\n--- Final result for "${w.title}": ${uniq.length} examples ---`);
+    uniq.forEach((ex, i) => {
+      console.log(`  ${i + 1}. Game ${ex.gameNumber}, Move ${ex.moveNumber}: ${ex.played} (${ex.playerColor})`);
+    });
+    console.log(`=== End grounding for "${w.title}" ===\n`);
 
     return uniq.slice(0, 3);
   };
@@ -1603,10 +1686,18 @@ export const generateReportFromGeminiFullGames = async (playerInfo, gameContext,
   // 6) Map parsed JSON to your existing UI contract, using grounded examples
   const recurringWeaknesses = Array.isArray(parsed.recurringWeaknesses) ? parsed.recurringWeaknesses.slice(0, 3) : [];
 
-  const recurringWeaknessesSection = recurringWeaknesses.map((w) => {
-    const grounded = groundExamples(w);
+  // Track used games across all weaknesses to ensure diversity
+  const globalUsedGames = new Set();
+  
+  console.log(`\n🎯 STARTING EXAMPLE GROUNDING FOR ${recurringWeaknesses.length} WEAKNESSES`);
+  console.log(`Available games:`, compactGames.map(g => g.gameNumber));
+  
+  const recurringWeaknessesSection = recurringWeaknesses.map((w, index) => {
+    console.log(`\n📋 Processing weakness ${index + 1}: "${w.title}"`);
+    const grounded = groundExamples(w, globalUsedGames);
     const top = grounded[0];
-    return ({
+    
+    const result = {
       title: w.title || 'Weakness',
       description: w.description || '',
       category: categorizeWeaknessByContent(w.description || w.title || ''),
@@ -1619,11 +1710,48 @@ export const generateReportFromGeminiFullGames = async (playerInfo, gameContext,
         fen: ex.fen,
         justification: ex.justification,
         betterPlan: ex.betterPlan,
-        betterMove: ex.betterMove
+        betterMove: ex.betterMove,
+        playerColor: ex.playerColor
       })),
       actionPlan: generateActionPlanForWeakness(w.title, categorizeWeaknessByContent(w.description || w.title || ''))
+    };
+    
+    console.log(`✅ Weakness "${w.title}" processed with ${grounded.length} examples`);
+    return result;
+  });
+  
+  // Final validation: ensure no game is used in multiple weaknesses
+  console.log(`\n🔍 FINAL VALIDATION: Checking for game diversity across weaknesses`);
+  const allUsedGames = new Set();
+  let hasDuplicates = false;
+  
+  recurringWeaknessesSection.forEach((weakness, wIndex) => {
+    console.log(`\nWeakness ${wIndex + 1}: "${weakness.title}"`);
+    weakness.examples.forEach((ex, eIndex) => {
+      const gameKey = ex.gameNumber;
+      console.log(`  Example ${eIndex + 1}: Game ${gameKey}, Move ${ex.moveNumber} (${ex.played})`);
+      
+      if (allUsedGames.has(gameKey)) {
+        console.warn(`  ⚠️  DUPLICATE GAME DETECTED: Game ${gameKey} used in multiple weaknesses!`);
+        hasDuplicates = true;
+      } else {
+        allUsedGames.add(gameKey);
+      }
     });
   });
+  
+  if (hasDuplicates) {
+    console.warn(`\n❌ GAME DIVERSITY ISSUE DETECTED - Some games are used in multiple weaknesses`);
+  } else {
+    console.log(`\n✅ GAME DIVERSITY VALIDATED - All examples use different games across weaknesses`);
+  }
+  
+  console.log(`\n📊 SUMMARY:`);
+  console.log(`- Total weaknesses: ${recurringWeaknessesSection.length}`);
+  console.log(`- Total examples: ${recurringWeaknessesSection.reduce((sum, w) => sum + w.examples.length, 0)}`);
+  console.log(`- Unique games used: ${allUsedGames.size}`);
+  console.log(`- Games available: ${compactGames.length}`);
+  console.log(`🎯 EXAMPLE GROUNDING COMPLETE\n`);
 
   const result = {
     geminiFullReport: {

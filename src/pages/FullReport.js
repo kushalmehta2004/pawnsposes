@@ -3,11 +3,15 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import reportService from '../services/reportService';
+
 import toast from 'react-hot-toast';
 
 // Simple in-memory cache to persist across route toggles within the same session
 // Resets naturally when the app reloads or user leaves these pages
 let FULL_REPORT_CACHE = { key: null, videoRec: null, phaseReview: null, positionalStudy: null, actionPlan: null, recurringWeaknesses: null };
+
+// Global set to track saved analysis IDs across component mounts
+let SAVED_ANALYSIS_IDS = new Set();
 
 const FullReport = () => {
   const location = useLocation();
@@ -29,6 +33,38 @@ const FullReport = () => {
 
   const [recurringWeaknesses, setRecurringWeaknesses] = React.useState(initialRecurringWeaknesses);
   const [reportSaved, setReportSaved] = React.useState(false);
+  const [savedReportId, setSavedReportId] = React.useState(null);
+
+  // State for async content loading
+  const [positionalStudy, setPositionalStudy] = React.useState(null);
+  const [isLoadingStudy, setIsLoadingStudy] = React.useState(false);
+  const [phaseReview, setPhaseReview] = React.useState(null);
+  const [actionPlan, setActionPlan] = React.useState(null);
+  const [isLoadingActionPlan, setIsLoadingActionPlan] = React.useState(false);
+
+  // Create a unique identifier for this analysis to prevent duplicate saves
+  const analysisId = React.useMemo(() => {
+    if (!analysis) return null;
+    const username = analysis?.username || analysis?.formData?.username || analysis?.player?.username;
+    const gameCount = analysis?.games?.length || analysis?.gameData?.length || 0;
+    
+    // Create a hash from the first few game IDs or moves to make it unique
+    let contentHash = '';
+    if (analysis?.games?.length > 0) {
+      contentHash = analysis.games.slice(0, 3).map(g => g.id || g.gameId || '').join('_');
+    } else if (analysis?.gameData?.length > 0) {
+      contentHash = analysis.gameData.slice(0, 3).map(g => g.id || g.gameId || '').join('_');
+    }
+    
+    return `${username}_${gameCount}_${contentHash}`;
+  }, [analysis]);
+
+  // Check if this analysis was already saved and update the state accordingly
+  React.useEffect(() => {
+    if (analysisId && SAVED_ANALYSIS_IDS.has(analysisId)) {
+      setReportSaved(true);
+    }
+  }, [analysisId]);
 
   // Cache recurring weaknesses to avoid recalculating on navigation
   React.useEffect(() => {
@@ -64,10 +100,19 @@ const FullReport = () => {
 
     const run = async () => {
       try {
-        if (!recurringWeaknesses || recurringWeaknesses.length === 0) return;
+        if (!recurringWeaknesses || recurringWeaknesses.length === 0) {
+          setVideoRec({ title: null, url: null });
+          return;
+        }
+        
+        setIsLoadingVideo(true);
         const { searchBestYouTubeForWeakness } = await import('../services/youtubeSearchService');
         const topic = (recurringWeaknesses?.[0]?.title || '').toString().trim();
-        if (!topic) return;
+        if (!topic) {
+          setVideoRec({ title: null, url: null });
+          return;
+        }
+        
         const rec = await searchBestYouTubeForWeakness(topic);
         if (rec?.url) {
           if (!cancelled) {
@@ -76,9 +121,21 @@ const FullReport = () => {
             FULL_REPORT_CACHE = { ...FULL_REPORT_CACHE, key: cacheKey, videoRec: value };
           }
           return;
+        } else {
+          // No video found
+          if (!cancelled) {
+            setVideoRec({ title: null, url: null });
+          }
         }
       } catch (e) {
         // No fallback shown to avoid unreliable links
+        if (!cancelled) {
+          setVideoRec({ title: null, url: null });
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingVideo(false);
+        }
       }
     };
     run();
@@ -127,7 +184,22 @@ const FullReport = () => {
     }
   }, [analysis, performanceMetrics, recurringWeaknesses, isCalculatingMetrics, isAnalyzingWeaknesses, dataSource]);
 
-  // Auto-save report when analysis is complete (only for new reports, not saved ones)
+  // Autosave functionality removed - users now save manually using the Save button
+  // Track loading states for all async content
+  const [isLoadingVideo, setIsLoadingVideo] = React.useState(false);
+  const [isLoadingPhaseReview, setIsLoadingPhaseReview] = React.useState(false);
+
+  // Check if all content has finished loading
+  const isAllContentLoaded = React.useMemo(() => {
+    const hasVideoContent = !recurringWeaknesses || recurringWeaknesses.length === 0 || (!isLoadingVideo && videoRec?.url !== undefined);
+    const hasPositionalStudy = !recurringWeaknesses || recurringWeaknesses.length === 0 || (!isLoadingStudy && positionalStudy !== null);
+    const hasPhaseReview = !analysis?.games?.length || (!isLoadingPhaseReview && phaseReview !== null);
+    const hasActionPlan = !recurringWeaknesses || recurringWeaknesses.length === 0 || (!isLoadingActionPlan && actionPlan !== null);
+    
+    return hasVideoContent && hasPositionalStudy && hasPhaseReview && hasActionPlan;
+  }, [recurringWeaknesses, videoRec, positionalStudy, isLoadingStudy, phaseReview, isLoadingPhaseReview, actionPlan, isLoadingActionPlan, analysis, isLoadingVideo]);
+
+  // Auto-save report when analysis is complete AND all content has loaded (only for new reports, not saved ones)
   React.useEffect(() => {
     const saveReportAutomatically = async () => {
       // Debug logging for auto-save conditions
@@ -139,34 +211,57 @@ const FullReport = () => {
         recurringWeaknesses: !!recurringWeaknesses,
         reportId: reportId,
         reportSaved: reportSaved,
+        analysisId: analysisId,
+        alreadySaved: SAVED_ANALYSIS_IDS.has(analysisId),
+        savedAnalysisCount: SAVED_ANALYSIS_IDS.size,
         dataSource: dataSource,
-        isFromSavedReport: dataSource?.includes('saved_report')
+        isFromSavedReport: dataSource?.includes('saved_report'),
+        isAllContentLoaded: isAllContentLoaded,
+        loadingStates: {
+          isLoadingVideo: isLoadingVideo,
+          isLoadingStudy: isLoadingStudy,
+          isLoadingPhaseReview: isLoadingPhaseReview,
+          isLoadingActionPlan: isLoadingActionPlan
+        },
+        contentStates: {
+          hasVideoRec: !!videoRec?.url,
+          hasPositionalStudy: !!positionalStudy,
+          hasPhaseReview: !!phaseReview,
+          hasActionPlan: !!actionPlan
+        }
       });
 
       // Only save if:
       // 1. User is authenticated
       // 2. We have complete analysis data
       // 3. This is not a saved report being viewed (no reportId)
-      // 4. Report hasn't been saved yet
+      // 4. This specific analysis hasn't been saved before
       // 5. Data source indicates this is from a fresh analysis
+      // 6. ALL content has finished loading (including async components)
       if (
         user && 
         analysis && 
         performanceMetrics && 
         recurringWeaknesses && 
         !reportId && 
-        !reportSaved &&
+        analysisId &&
+        !SAVED_ANALYSIS_IDS.has(analysisId) &&
         dataSource && 
-        !dataSource.includes('saved_report')
+        !dataSource.includes('saved_report') &&
+        isAllContentLoaded
       ) {
         try {
-          console.log('🔄 Auto-saving complete chess analysis report...');
+          console.log('🔄 Auto-saving complete chess analysis report (all content loaded)...');
           console.log('📊 Report data preview:', {
             analysisGames: analysis?.games?.length || analysis?.gameData?.length,
             username: analysis?.username || analysis?.formData?.username,
             platform: analysis?.formData?.platform || analysis?.platform,
             performanceMetricsKeys: Object.keys(performanceMetrics || {}),
-            recurringWeaknessesCount: recurringWeaknesses?.length
+            recurringWeaknessesCount: recurringWeaknesses?.length,
+            hasVideoRec: !!videoRec?.url,
+            hasPositionalStudy: !!positionalStudy,
+            hasPhaseReview: !!phaseReview,
+            hasActionPlan: !!actionPlan
           });
           
           const reportData = {
@@ -175,17 +270,20 @@ const FullReport = () => {
             recurringWeaknesses,
             engineInsights,
             improvementRecommendations,
-            personalizedResources
+            personalizedResources,
+            // Include the additional content that loads asynchronously
+            videoRecommendation: videoRec,
+            positionalStudy,
+            phaseReview,
+            actionPlan
           };
 
           const savedReport = await reportService.saveReport(reportData, user.id);
           setReportSaved(true);
+          setSavedReportId(savedReport.id);
+          SAVED_ANALYSIS_IDS.add(analysisId);
           
-          console.log('✅ Report auto-saved successfully:', savedReport.id);
-          toast.success('Report saved to your dashboard!', {
-            duration: 3000,
-            icon: '💾'
-          });
+          console.log('✅ Report auto-saved successfully with all content:', savedReport.id);
 
         } catch (error) {
           console.error('❌ Failed to auto-save report:', error);
@@ -212,14 +310,16 @@ const FullReport = () => {
           });
         }
       } else {
-        console.log('⏭️ Auto-save skipped - conditions not met');
+        console.log('⏭️ Auto-save skipped - conditions not met or content still loading');
       }
     };
 
-    // Add a small delay to ensure all data is fully loaded
-    const timeoutId = setTimeout(saveReportAutomatically, 2000);
-    return () => clearTimeout(timeoutId);
-  }, [user, analysis, performanceMetrics, recurringWeaknesses, engineInsights, improvementRecommendations, personalizedResources, reportId, reportSaved, dataSource]);
+    // Only attempt to save if all content is loaded, with a minimum delay
+    if (isAllContentLoaded) {
+      const timeoutId = setTimeout(saveReportAutomatically, 1000);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [user, analysis, performanceMetrics, recurringWeaknesses, engineInsights, improvementRecommendations, personalizedResources, reportId, analysisId, dataSource, isAllContentLoaded, videoRec, positionalStudy, phaseReview, actionPlan]);
 
   const handleBackToReport = () => {
     // Pass computed data back so ReportDisplay can reuse it without refetching
@@ -242,13 +342,7 @@ const FullReport = () => {
       } 
     });
   };
-
   const handleManualSave = async () => {
-    if (!user) {
-      toast.error('Please log in to save reports', { icon: '🔒' });
-      return;
-    }
-
     if (reportSaved) {
       toast.info('Report already saved!', { icon: '✅' });
       return;
@@ -264,37 +358,38 @@ const FullReport = () => {
         personalizedResources
       };
 
-      toast.loading('Saving report...', { id: 'manual-save' });
-      
+      toast.loading('Generating PDF...', { id: 'manual-save' });
+
       const savedReport = await reportService.saveReport(reportData, user.id);
       setReportSaved(true);
-      
-      toast.success('Report saved successfully!', { 
+
+      toast.success('Report saved as PDF successfully!', {
         id: 'manual-save',
         icon: '💾',
-        duration: 3000 
+        duration: 3000
       });
-      
+
       console.log('✅ Manual save successful:', savedReport.id);
-      
     } catch (error) {
       console.error('❌ Manual save failed:', error);
-      
+
       let errorMessage = 'Failed to save report';
-      if (error.message?.includes('timeout')) {
-        errorMessage = 'Report is too large. Try analyzing fewer games.';
-      } else if (error.message?.includes('too large')) {
-        errorMessage = 'Report data is too large. Please try with fewer games.';
+      if (error.message?.includes('bucket') || error.message?.includes('storage')) {
+        errorMessage = 'PDF storage not set up yet. Please contact support to enable PDF reports.';
+      } else if (error.message?.includes('PDF')) {
+        errorMessage = 'Failed to generate PDF. Please try again.';
       } else if (error.message?.includes('403')) {
         errorMessage = 'Permission denied. Please check your login status.';
       } else if (error.message?.includes('500')) {
         errorMessage = 'Server error. Please try again later.';
+      } else {
+        errorMessage = error.message || 'Unknown error occurred';
       }
-      
-      toast.error(errorMessage, { 
+
+      toast.error(errorMessage, {
         id: 'manual-save',
         duration: 7000,
-        icon: '❌' 
+        icon: '❌'
       });
     }
   };
@@ -352,12 +447,6 @@ const FullReport = () => {
     return null;
   }
 
-  const [positionalStudy, setPositionalStudy] = React.useState(null);
-  const [isLoadingStudy, setIsLoadingStudy] = React.useState(false);
-  const [phaseReview, setPhaseReview] = React.useState(null);
-  const [actionPlan, setActionPlan] = React.useState(null);
-  const [isLoadingActionPlan, setIsLoadingActionPlan] = React.useState(false);
-
   React.useEffect(() => {
     let cancelled = false;
 
@@ -403,6 +492,8 @@ const FullReport = () => {
     const runPhaseReview = async () => {
       try {
         if (!analysis || !Array.isArray(analysis.games) || analysis.games.length === 0) return;
+        
+        setIsLoadingPhaseReview(true);
         const games = analysis.games;
         // Build a compact summary for Gemini (minimal fields)
         const gamesSummary = games.slice(0, 20).map(g => ({
@@ -427,6 +518,10 @@ const FullReport = () => {
         }
       } catch (e) {
         console.warn('Phase review generation skipped:', e.message);
+      } finally {
+        if (!cancelled) {
+          setIsLoadingPhaseReview(false);
+        }
       }
     };
     runPhaseReview();
@@ -752,16 +847,6 @@ const FullReport = () => {
 
       <div className="page-container">
         <div className="print-button-container">
-          {user && !reportSaved && (
-            <button onClick={handleManualSave} className="print-button no-print" style={{ marginRight: '1rem', backgroundColor: '#059669' }}>
-              <i className="fas fa-save" style={{ marginRight: '0.5rem' }}></i>Save Report
-            </button>
-          )}
-          {user && reportSaved && (
-            <button disabled className="print-button no-print" style={{ marginRight: '1rem', backgroundColor: '#10b981', opacity: 0.7 }}>
-              <i className="fas fa-check" style={{ marginRight: '0.5rem' }}></i>Saved
-            </button>
-          )}
           <button onClick={handleDownloadPDF} className="print-button no-print">
             <i className="fas fa-download" style={{ marginRight: '0.5rem' }}></i>Download PDF
           </button>
@@ -1672,6 +1757,27 @@ const FullReport = () => {
             </section>
           </main>
         </motion.div>
+        
+        {/* Small "Report saved" marker at bottom right */}
+        {reportSaved && (
+          <div style={{
+            position: 'fixed',
+            bottom: '20px',
+            right: '20px',
+            backgroundColor: '#10b981',
+            color: 'white',
+            padding: '8px 12px',
+            borderRadius: '6px',
+            fontSize: '12px',
+            fontWeight: '500',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+            zIndex: 1000,
+            opacity: 0.9
+          }}>
+            <i className="fas fa-check" style={{ marginRight: '6px', fontSize: '10px' }}></i>
+            Report saved
+          </div>
+        )}
       </div>
     </div>
   );

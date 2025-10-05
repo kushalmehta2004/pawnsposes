@@ -36,7 +36,7 @@ const PuzzlePage = () => {
   const getCacheKey = () => {
     const user = username || 'anonymous';
     // Increment version to refresh cached sets when generation rules change
-    const version = 'v5-01-mistakes-multimove-only-fill-dedup';
+    const version = 'v11-adaptive-4to16plies';  // Updated: Adaptive strategy (4-16 plies)
     const diff = (['fix-weaknesses', 'master-openings', 'sharpen-endgame'].includes(puzzleType)) ? `:${difficulty}` : '';
     return `pawnsposes:puzzles:${user}:${puzzleType}${diff}:${version}`;
   };
@@ -179,7 +179,7 @@ const PuzzlePage = () => {
 
         case 'learn-mistakes': {
           // Generate directly from user mistakes to ensure distinct set
-          generatedPuzzles = await puzzleGenerationService.generateMistakePuzzles(username, { maxPuzzles: 30 });
+          generatedPuzzles = await puzzleGenerationService.generateMistakePuzzles(username, { maxPuzzles: 20 });
           metadata = {
             title: 'Learn From My Mistakes',
             subtitle: 'Puzzles from your mistakes',

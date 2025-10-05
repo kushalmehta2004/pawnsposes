@@ -67,9 +67,10 @@ class MistakeAnalysisService {
     const {
       maxGames = 10,
       onProgress = () => {},
-      analysisDepth = 18,
-      timeLimit = 5000,
-      maxMistakesToStore = null
+      analysisDepth = 10,
+      timeLimit = 400,
+      maxMistakesToStore = null,
+      maxPositionsPerGame = 10
     } = options;
 
     if (this.isAnalyzing) {
@@ -107,6 +108,7 @@ class MistakeAnalysisService {
           const gameMistakes = await this.analyzeGameForMistakes(game, {
             analysisDepth,
             timeLimit,
+            maxPositionsPerGame,
             onProgress: (pos) => {
               totalPositionsAnalyzed++;
               onProgress({
@@ -114,7 +116,8 @@ class MistakeAnalysisService {
                 total: games.length,
                 stage: 'analyzing_position',
                 message: `Game ${i + 1}: Move ${pos.moveNumber}`,
-                positionsAnalyzed: totalPositionsAnalyzed
+                positionsAnalyzed: totalPositionsAnalyzed,
+                progress: (i / games.length) * 100
               });
             }
           });
@@ -126,8 +129,8 @@ class MistakeAnalysisService {
           console.warn(`❌ Failed to analyze game ${game.gameId}:`, error.message);
         }
 
-        // Small delay between games (reduced for speed)
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // Minimal delay between games for optimal speed
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
 
       // Store all detected mistakes (optionally capped)
@@ -167,8 +170,9 @@ class MistakeAnalysisService {
    */
   async analyzeGameForMistakes(game, options = {}) {
     const {
-      analysisDepth = 18,
-      timeLimit = 5000,
+      analysisDepth = 10,
+      timeLimit = 400,
+      maxPositionsPerGame = 10,
       onProgress = () => {}
     } = options;
 
@@ -214,7 +218,7 @@ class MistakeAnalysisService {
       if (pb !== pa) return pb - pa;
       return a.moveIndex - b.moveIndex;
     });
-    const cappedPositions = sortedPositions.slice(0, 25);
+    const cappedPositions = sortedPositions.slice(0, maxPositionsPerGame);
 
     // Build FEN payloads up-front; only include player's move positions (same behavior as before)
     const fenPayloads = cappedPositions
@@ -231,11 +235,11 @@ class MistakeAnalysisService {
         };
       });
 
-    // Batch analyze with light concurrency (2 workers)
+    // Batch analyze with optimized concurrency (4 workers for faster processing)
     const analyzed = await this.stockfish.analyzePositions(fenPayloads, {
       depth: analysisDepth,
       timeLimit,
-      concurrency: 2,
+      concurrency: 4,
       onProgress: ({ current, total, position }) => {
         onProgress({ moveNumber: position.moveNumber, current, total, progress: Math.round((current / Math.max(total, 1)) * 100) });
       }
@@ -268,13 +272,13 @@ class MistakeAnalysisService {
   }
 
   /**
-   * Select key positions for analysis (not every move to save time)
+   * Select key positions for analysis (optimized for speed - only critical positions)
    */
   selectKeyPositions(moves, game) {
     const positions = [];
     
-    // Analyze every 3rd move after move 10 (opening phase)
-    for (let i = 10; i < Math.min(moves.length, 40); i += 3) {
+    // OPTIMIZED: Analyze every 5th move after move 10 (reduced from every 3rd)
+    for (let i = 10; i < Math.min(moves.length, 40); i += 5) {
       positions.push({
         moveIndex: i,
         moveNumber: Math.floor(i / 2) + 1,
@@ -283,9 +287,9 @@ class MistakeAnalysisService {
       });
     }
 
-    // Analyze more frequently in endgame (last 20 moves)
+    // OPTIMIZED: Analyze every 3rd move in endgame (reduced from every 2nd)
     const endgameStart = Math.max(40, moves.length - 20);
-    for (let i = endgameStart; i < moves.length; i += 2) {
+    for (let i = endgameStart; i < moves.length; i += 3) {
       positions.push({
         moveIndex: i,
         moveNumber: Math.floor(i / 2) + 1,

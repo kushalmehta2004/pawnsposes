@@ -140,75 +140,26 @@ class PuzzleGenerationService {
 
   /**
    * Generate puzzles for "Learn From My Mistakes" based on actual game positions
+   * MANDATORY: Generate EXACTLY 20 multi-move puzzles (minimum 4 plies each)
    */
   async generateMistakePuzzles(username, options = {}) {
-    const { maxPuzzles = 10, difficulty = 'intermediate' } = options;
+    const { maxPuzzles = 20, difficulty = 'intermediate' } = options;
+    const EXACT_PUZZLES = 20;  // EXACTLY 20 puzzles, no more, no less
+    const MINIMUM_PLIES = 10;  // 5 full moves minimum (5 user decisions) - high-quality long tactical puzzles
+    const TARGET_PLIES = 16;   // Target 8 full moves for maximum tactical depth
     
-    console.log(`🧩 Generating mistake-based puzzles for ${username}...`);
+    console.log(`🧩 Generating EXACTLY ${EXACT_PUZZLES} long multi-move puzzles (10-16 plies) for ${username}...`);
     
     try {
       // Get stored mistakes with position data
-      const mistakes = await puzzleDataService.getUserMistakes(username);
+      const mistakes = await puzzleDataService.getUserMistakes(username, 200); // Get more mistakes to ensure we have enough
       
       console.log(`📊 Found ${mistakes?.length || 0} stored mistakes for ${username}`);
       
       if (!mistakes || mistakes.length === 0) {
-        console.warn('⚠️ No stored mistakes found - using fallback puzzles');
-        const baseFallbackPuzzles = this.generateFallbackPuzzles('learn-mistakes', maxPuzzles);
-        baseFallbackPuzzles.forEach(puzzle => {
-          puzzle.source = 'fallback';
-          puzzle.debugInfo = 'No stored mistakes found';
-        });
-        // Apply multi-move enhancement to fallback puzzles too
-        const enhancedFallback = [];
-        for (const p of baseFallbackPuzzles) {
-          try {
-            const targetMin = 12;
-            const targetMax = 14;
-            let line = await extendPv(p.position, targetMin, targetMax);
-
-            if (line.length < 2) {
-              const first = toUciFromSolution(p.solution, p.position);
-              if (first) {
-                const fen2 = applyUciMove(p.position, first);
-                if (fen2) {
-                  const tail = await extendPv(fen2, Math.max(targetMin - 1, 1), targetMax - 1);
-                  line = [first, ...tail];
-                } else {
-                  line = [first];
-                }
-              }
-            }
-
-            if (line.length < targetMin) {
-              let cur = p.position;
-              for (const mv of line) {
-                const nf = applyUciMove(cur, mv);
-                if (!nf) { cur = null; break; }
-                cur = nf;
-              }
-              if (cur) {
-                const add = await stepwiseExtend(cur, targetMin - line.length, Math.max(targetMax - line.length, 1), 1000);
-                line = [...line, ...add];
-              }
-            }
-
-            if (line.length > 0) {
-              p.lineUci = line.slice(0, targetMax).join(' ');
-              p.startLineIndex = 0;
-            }
-            p.difficulty = 'advanced';
-            p.estimatedRating = 2000;
-            p.rating = 2000;
-            enhancedFallback.push(p);
-          } catch (e) {
-            p.difficulty = p.difficulty || 'advanced';
-            p.estimatedRating = p.estimatedRating || 2000;
-            p.rating = p.rating || 2000;
-            enhancedFallback.push(p);
-          }
-        }
-        return enhancedFallback;
+        console.error('❌ No stored mistakes found - cannot generate puzzles without user game data');
+        console.error('💡 Please import games first to generate personalized puzzles');
+        return [];
       }
 
       // Filter mistakes that have valid FEN positions
@@ -219,71 +170,22 @@ class PuzzleGenerationService {
       console.log(`🎯 Found ${mistakesWithPositions.length} mistakes with valid positions`);
 
       if (mistakesWithPositions.length === 0) {
-        console.warn('⚠️ No mistakes with valid positions found - using fallback puzzles');
-        const baseFallbackPuzzles = this.generateFallbackPuzzles('learn-mistakes', maxPuzzles);
-        baseFallbackPuzzles.forEach(puzzle => {
-          puzzle.source = 'fallback';
-          puzzle.debugInfo = 'No mistakes with valid positions';
-        });
-        // Apply multi-move enhancement to fallback puzzles too
-        const enhancedFallback = [];
-        for (const p of baseFallbackPuzzles) {
-          try {
-            const targetMin = 12;
-            const targetMax = 14;
-            let line = await extendPv(p.position, targetMin, targetMax);
-
-            if (line.length < 2) {
-              const first = toUciFromSolution(p.solution, p.position);
-              if (first) {
-                const fen2 = applyUciMove(p.position, first);
-                if (fen2) {
-                  const tail = await extendPv(fen2, Math.max(targetMin - 1, 1), targetMax - 1);
-                  line = [first, ...tail];
-                } else {
-                  line = [first];
-                }
-              }
-            }
-
-            if (line.length < targetMin) {
-              let cur = p.position;
-              for (const mv of line) {
-                const nf = applyUciMove(cur, mv);
-                if (!nf) { cur = null; break; }
-                cur = nf;
-              }
-              if (cur) {
-                const add = await stepwiseExtend(cur, targetMin - line.length, Math.max(targetMax - line.length, 1), 1000);
-                line = [...line, ...add];
-              }
-            }
-
-            if (line.length > 0) {
-              p.lineUci = line.slice(0, targetMax).join(' ');
-              p.startLineIndex = 0;
-            }
-            p.difficulty = 'advanced';
-            p.estimatedRating = 2000;
-            p.rating = 2000;
-            enhancedFallback.push(p);
-          } catch (e) {
-            p.difficulty = p.difficulty || 'advanced';
-            p.estimatedRating = p.estimatedRating || 2000;
-            p.rating = p.rating || 2000;
-            enhancedFallback.push(p);
-          }
-        }
-        return enhancedFallback;
+        console.error('❌ No mistakes with valid positions found - cannot generate puzzles');
+        console.error('💡 Please ensure imported games have valid position data');
+        return [];
       }
 
       // Randomize and interleave by game to avoid consecutive from the same game
+      // Get MORE mistakes initially to ensure we can reach EXACT_PUZZLES after filtering
+      // For long puzzles (10-16 plies), we need MORE candidates since success rate is lower (~30-40%)
       const orderedMistakes = this._interleaveByGame(
         [...mistakesWithPositions].sort(() => Math.random() - 0.5),
-        maxPuzzles,
+        Math.min(mistakesWithPositions.length, 100), // Process up to 100 positions to find 20 long puzzles
         (m) => m.gameId || m.game_id || m.game || m.gameNumber || null
       );
       const basePuzzles = orderedMistakes.map((mistake, index) => this.convertMistakeToPuzzle(mistake, index + 1));
+      
+      console.log(`🎲 Processing ${basePuzzles.length} mistake positions to generate ${EXACT_PUZZLES} long puzzles...`);
 
       // Build multi-move lines for ALL puzzles by extending engine PVs iteratively
       const enhanced = [];
@@ -317,222 +219,246 @@ class PuzzleGenerationService {
           return null;
         }
       };
-      const extendPv = async (fen, wantPlies = 4, maxPlies = 8) => {
+      const extendPv = async (fen, wantPlies = 10, maxPlies = 16) => {
         const out = [];
         let curFen = fen;
-        // First analysis deeper, subsequent faster to extend - balanced for speed and quality
-        const firstTime = 3000;
-        const nextTime = 1500;
-        while (out.length < wantPlies && out.length < maxPlies) {
-          const timeBudget = out.length === 0 ? firstTime : nextTime;
-          const analysis = await stockfishAnalyzer.analyzePositionDeep(curFen, 22, timeBudget);
-          let pv = Array.isArray(analysis?.principalVariation) ? analysis.principalVariation : [];
-          if ((!pv || pv.length === 0) && analysis?.bestMove) pv = [analysis.bestMove];
-          if (!pv || pv.length === 0) break;
-          let appended = 0;
-          for (const mv of pv) {
-            if (!isUci(mv)) break;
-            const nf = applyUciMove(curFen, mv);
-            if (!nf) break;
-            out.push(mv.toLowerCase());
-            curFen = nf;
-            appended++;
-            if (out.length >= maxPlies) break;
-          }
-          if (appended === 0) break; // cannot extend further
-        }
-        return out;
-      };
-
-      // Fallback: stepwise extension using single best move per ply to guarantee a multi-move line
-      const stepwiseExtend = async (fen, minPlies = 4, maxPlies = 8, perPlyTime = 1000) => {
-        const out = [];
-        let curFen = fen;
-        while (out.length < minPlies && out.length < maxPlies) {
-          const analysis = await stockfishAnalyzer.analyzePositionDeep(curFen, 22, perPlyTime);
-          const mv = (Array.isArray(analysis?.principalVariation) && analysis.principalVariation[0]) || analysis?.bestMove;
-          if (!isUci(mv)) break;
-          const nf = applyUciMove(curFen, mv);
-          if (!nf) break;
-          out.push(mv.toLowerCase());
-          curFen = nf;
-        }
-        return out;
-      };
-
-      const enforceMinimumLine = async (fen, primaryMoveUci, targetMin, targetMax) => {
-        if (targetMin <= 0) return [];
-        let line = [];
-
-        if (primaryMoveUci && isUci(primaryMoveUci)) {
-          const fenAfterPrimary = applyUciMove(fen, primaryMoveUci);
-          if (fenAfterPrimary) {
-            const remainder = await stepwiseExtend(fenAfterPrimary, Math.max(targetMin - 1, 0), Math.max(targetMax - 1, 0), 1200);
-            if (remainder.length >= Math.max(targetMin - 1, 0)) {
-              line = [primaryMoveUci.toLowerCase(), ...remainder.slice(0, Math.max(targetMax - 1, 0))];
+        // Longer timeouts for better quality long puzzles
+        const firstTime = 500;    // 500ms for first move - better quality
+        const nextTime = 400;     // 400ms for subsequent moves - maintain quality
+        
+        while (out.length < maxPlies) {
+          try {
+            const timeBudget = out.length === 0 ? firstTime : nextTime;
+            const analysis = await stockfishAnalyzer.analyzePositionDeep(curFen, 15, timeBudget);  // Depth 15 - higher quality for long puzzles
+            let pv = Array.isArray(analysis?.principalVariation) ? analysis.principalVariation : [];
+            if ((!pv || pv.length === 0) && analysis?.bestMove) pv = [analysis.bestMove];
+            if (!pv || pv.length === 0) break;
+            
+            let appended = 0;
+            for (const mv of pv) {
+              if (!isUci(mv)) break;
+              const nf = applyUciMove(curFen, mv);
+              if (!nf) break;
+              out.push(mv.toLowerCase());
+              curFen = nf;
+              appended++;
+              if (out.length >= maxPlies) break;
             }
+            
+            if (appended === 0) break; // cannot extend further
+            
+            // If we have enough plies, we can stop early
+            if (out.length >= wantPlies) break;
+          } catch (err) {
+            // Timeout or analysis error - return what we have so far
+            break;
           }
         }
-
-        if (line.length < targetMin) {
-          const fallbackLine = await stepwiseExtend(fen, targetMin, targetMax, 1200);
-          if (fallbackLine.length >= targetMin) {
-            line = fallbackLine.slice(0, targetMax);
-          }
-        }
-
-        return line;
+        return out;
       };
 
-      for (const p of basePuzzles) {
-        try {
-          // Target: at least 12 plies (6 full moves), up to 14 plies (7 full moves) for all puzzles
-          const targetMin = 12;
-          const targetMax = 14;
-          let line = await extendPv(p.position, targetMin, targetMax);
+      // Parallel batch processing for long puzzle generation
+      const BATCH_SIZE = 5; // Process 5 positions in parallel for better quality control
+      let processedCount = 0;
+      
+      for (let i = 0; i < basePuzzles.length; i += BATCH_SIZE) {
+        // Stop IMMEDIATELY if we already have exactly EXACT_PUZZLES
+        if (enhanced.length >= EXACT_PUZZLES) {
+          break;
+        }
+        
+        const batch = basePuzzles.slice(i, i + BATCH_SIZE);
+        
+        // Process batch in parallel
+        const batchResults = await Promise.allSettled(
+          batch.map(async (p) => {
+            try {
+              const targetMin = MINIMUM_PLIES;
+              const targetMax = TARGET_PLIES;
+              
+              // Try to extend the position to create long puzzle
+              const line = await extendPv(p.position, targetMin, targetMax);
 
-          // Fallback: use provided solution as first move, then extend
-          if (line.length < 2) {
-            const first = toUciFromSolution(p.solution, p.position);
-            if (first) {
-              const fen2 = applyUciMove(p.position, first);
-              if (fen2) {
-                const tail = await extendPv(fen2, Math.max(targetMin - 1, 1), targetMax - 1);
-                line = [first, ...tail];
-              } else {
-                line = [first];
+              // Skip if doesn't meet minimum (10 plies = 5 user decisions)
+              if (line.length < targetMin) {
+                return null;
               }
+
+              // Success! Return enhanced long puzzle
+              return {
+                ...p,
+                lineUci: line.slice(0, targetMax).join(' '),
+                startLineIndex: 0,
+                difficulty: 'advanced',
+                estimatedRating: 2000,
+                rating: 2000,
+                source: p.source || 'user_game',
+                plies: line.length,
+                userDecisions: Math.floor(line.length / 2) // Track number of user decisions
+              };
+            } catch (e) {
+              return null;
+            }
+          })
+        );
+        
+        // Collect successful results
+        for (const result of batchResults) {
+          if (result.status === 'fulfilled' && result.value) {
+            enhanced.push(result.value);
+            console.log(`✅ Generated long puzzle ${enhanced.length}/${EXACT_PUZZLES} with ${result.value.plies} plies (${result.value.userDecisions} user decisions)`);
+            
+            // STOP IMMEDIATELY when we reach exactly EXACT_PUZZLES
+            if (enhanced.length >= EXACT_PUZZLES) {
+              break;
             }
           }
-
-          // If still short, stepwise-extend by re-analyzing after each ply
-          if (line.length < targetMin) {
-            let cur = p.position;
-            for (const mv of line) {
-              const nf = applyUciMove(cur, mv);
-              if (!nf) { cur = null; break; }
-              cur = nf;
-            }
-            if (cur) {
-              const add = await stepwiseExtend(cur, targetMin - line.length, Math.max(targetMax - line.length, 1), 1000);
-              line = [...line, ...add];
-            }
-          }
-
-          if (line.length < targetMin) {
-            const primaryMove = toUciFromSolution(p.solution, p.position);
-            const enforcedLine = await enforceMinimumLine(p.position, primaryMove, targetMin, targetMax);
-            if (enforcedLine.length >= targetMin) {
-              line = enforcedLine;
-            }
-          }
-
-          if (line.length < targetMin) {
-            const extendedFromStart = await stepwiseExtend(p.position, targetMin, targetMax, 1200);
-            if (extendedFromStart.length >= targetMin) {
-              line = extendedFromStart;
-            }
-          }
-
-          if (line.length < targetMin) {
-            console.warn(`⚠️ Dropping puzzle ${p?.id || ''} due to insufficient line length (${line.length} plies)`);
-            continue;
-          }
-
-          // Final trim and assign
-          p.lineUci = line.slice(0, targetMax).join(' ');
-          p.startLineIndex = 0;
-          // Tag difficulty metadata for UI/analytics
-          p.difficulty = 'advanced';
-          p.estimatedRating = 2000;
-          p.rating = 2000;
-          p.source = p.source || 'user_game';
-          enhanced.push(p);
-        } catch (e) {
-          p.difficulty = p.difficulty || 'advanced';
-          p.estimatedRating = p.estimatedRating || 2000;
-          p.rating = p.rating || 2000;
-          p.source = p.source || 'user_game';
-          enhanced.push(p);
         }
+        
+        processedCount += batch.length;
+        console.log(`🔄 Processed ${processedCount}/${basePuzzles.length} positions (Generated: ${enhanced.length}/${EXACT_PUZZLES})`);
       }
 
       // Sort by line length (shortest lines first for easy difficulty)
       const toks = (s) => String(s || '').split(/\s+/).filter(Boolean);
       enhanced.sort((a, b) => toks(a.lineUci).length - toks(b.lineUci).length);
 
-      // Assign difficulties: first 10 easy, next 10 medium, last 10 hard
-      const result = enhanced.slice(0, maxPuzzles).map((p, index) => {
+      // If we don't have enough puzzles, use ADAPTIVE STRATEGY with looser requirements
+      if (enhanced.length < EXACT_PUZZLES) {
+        console.warn(`⚠️ Only ${enhanced.length}/${EXACT_PUZZLES} long puzzles generated. Trying adaptive strategy...`);
+        
+        const alreadyUsedPositions = new Set(enhanced.map(p => p.position));
+        let remainingCandidates = basePuzzles.filter(p => !alreadyUsedPositions.has(p.position));
+        
+        console.log(`🔄 Retrying with ${remainingCandidates.length} remaining positions using looser requirements...`);
+        
+        // ADAPTIVE STRATEGY: Try progressively shorter minimum plies
+        const adaptiveStrategies = [
+          { minPlies: 8, maxPlies: 16, label: 'medium-length (8-16 plies)' },  // 4-8 decisions
+          { minPlies: 6, maxPlies: 12, label: 'shorter (6-12 plies)' },        // 3-6 decisions
+          { minPlies: 4, maxPlies: 10, label: 'tactical (4-10 plies)' }        // 2-5 decisions
+        ];
+        
+        for (const strategy of adaptiveStrategies) {
+          // Stop if we already have enough puzzles
+          if (enhanced.length >= EXACT_PUZZLES) break;
+          
+          console.log(`🎯 Trying ${strategy.label} puzzles to fill remaining ${EXACT_PUZZLES - enhanced.length} slots...`);
+          
+          // Track positions used in this strategy to avoid duplicates
+          const usedInThisStrategy = new Set();
+          
+          for (let i = 0; i < remainingCandidates.length && enhanced.length < EXACT_PUZZLES; i += BATCH_SIZE) {
+            const batch = remainingCandidates.slice(i, i + BATCH_SIZE);
+            
+            const batchResults = await Promise.allSettled(
+              batch.map(async (p) => {
+                try {
+                  // Skip if already used in this strategy
+                  if (usedInThisStrategy.has(p.position)) return null;
+                  
+                  // Try with current strategy's requirements
+                  const line = await extendPv(p.position, strategy.minPlies, strategy.maxPlies);
+                  
+                  if (line.length >= strategy.minPlies) {
+                    usedInThisStrategy.add(p.position);
+                    return {
+                      ...p,
+                      lineUci: line.slice(0, strategy.maxPlies).join(' '),
+                      startLineIndex: 0,
+                      difficulty: 'advanced',
+                      estimatedRating: 2000,
+                      rating: 2000,
+                      source: p.source || 'user_game',
+                      plies: line.length,
+                      userDecisions: Math.floor(line.length / 2),
+                      adaptiveStrategy: strategy.label // Track which strategy was used
+                    };
+                  }
+                  return null;
+                } catch (e) {
+                  return null;
+                }
+              })
+            );
+            
+            for (const result of batchResults) {
+              if (result.status === 'fulfilled' && result.value) {
+                enhanced.push(result.value);
+                console.log(`✅ Generated puzzle ${enhanced.length}/${EXACT_PUZZLES} with ${result.value.plies} plies (${result.value.userDecisions} decisions) [${result.value.adaptiveStrategy}]`);
+                if (enhanced.length >= EXACT_PUZZLES) break;
+              }
+            }
+            
+            // Stop processing this strategy if we have enough
+            if (enhanced.length >= EXACT_PUZZLES) break;
+          }
+          
+          // Update remaining candidates for next strategy (remove positions used in this strategy)
+          remainingCandidates = remainingCandidates.filter(p => !usedInThisStrategy.has(p.position));
+          
+          // If this strategy filled the quota, no need to try easier ones
+          if (enhanced.length >= EXACT_PUZZLES) {
+            console.log(`✅ Reached ${EXACT_PUZZLES} puzzles using ${strategy.label} strategy`);
+            break;
+          }
+          
+          console.log(`📊 After ${strategy.label}: ${enhanced.length}/${EXACT_PUZZLES} puzzles, ${remainingCandidates.length} positions remaining`);
+        }
+        
+        // Re-sort after adding more puzzles (longest first for better user experience)
+        enhanced.sort((a, b) => toks(b.lineUci).length - toks(a.lineUci).length);
+      }
+
+      // Assign difficulties based on puzzle length: shorter = easier, longer = harder
+      const result = enhanced.slice(0, EXACT_PUZZLES).map((p, index) => {
         let difficulty, rating;
-        if (index < 10) {
+        const plies = p.plies || toks(p.lineUci).length;
+        
+        // Adaptive difficulty based on puzzle length
+        if (plies <= 5) {
           difficulty = 'easy';
-          rating = 1500 + Math.floor(Math.random() * 300); // 1500-1800
-        } else if (index < 20) {
+          rating = 1200 + Math.floor(Math.random() * 300); // 1200-1500 (very short)
+        } else if (plies <= 7) {
+          difficulty = 'easy';
+          rating = 1500 + Math.floor(Math.random() * 300); // 1500-1800 (short)
+        } else if (plies <= 9) {
           difficulty = 'medium';
-          rating = 1800 + Math.floor(Math.random() * 400); // 1800-2200
+          rating = 1700 + Math.floor(Math.random() * 300); // 1700-2000 (medium-short)
+        } else if (plies <= 11) {
+          difficulty = 'medium';
+          rating = 1900 + Math.floor(Math.random() * 300); // 1900-2200 (medium)
+        } else if (plies <= 13) {
+          difficulty = 'hard';
+          rating = 2100 + Math.floor(Math.random() * 300); // 2100-2400 (medium-long)
         } else {
           difficulty = 'hard';
-          rating = 2200 + Math.floor(Math.random() * 400); // 2200-2600
+          rating = 2300 + Math.floor(Math.random() * 400); // 2300-2700 (very long)
         }
         return { ...p, difficulty, rating };
       });
 
-      console.log(`✅ Prepared ${result.length} mistake-based puzzles from IndexedDB with difficulties assigned by line length`);
+      if (result.length < EXACT_PUZZLES) {
+        console.warn(`⚠️ Generated ${result.length}/${EXACT_PUZZLES} puzzles from user mistakes`);
+        console.warn(`💡 Import more games to generate the full set of 20 puzzles`);
+      } else {
+        // Count puzzles by length category
+        const longPuzzles = result.filter(p => (p.plies || 0) >= 10).length;
+        const mediumPuzzles = result.filter(p => (p.plies || 0) >= 6 && (p.plies || 0) < 10).length;
+        const shortPuzzles = result.filter(p => (p.plies || 0) < 6).length;
+        
+        console.log(`✅ Successfully generated ${result.length} puzzles from user mistakes:`);
+        if (longPuzzles > 0) console.log(`   📏 ${longPuzzles} long puzzles (10-16 plies = 5-8 decisions)`);
+        if (mediumPuzzles > 0) console.log(`   📏 ${mediumPuzzles} medium puzzles (6-9 plies = 3-4 decisions)`);
+        if (shortPuzzles > 0) console.log(`   📏 ${shortPuzzles} short puzzles (4-5 plies = 2 decisions)`);
+      }
+      
       return result;
       
     } catch (error) {
-      console.error('❌ Error generating mistake puzzles:', error);
-      const baseFallbackPuzzles = this.generateFallbackPuzzles('learn-mistakes', maxPuzzles);
-      // Apply multi-move enhancement to fallback puzzles in catch block too
-      const enhancedFallback = [];
-      for (const p of baseFallbackPuzzles) {
-        try {
-          const targetMin = 12;
-          const targetMax = 14;
-          let line = await extendPv(p.position, targetMin, targetMax);
-
-          if (line.length < 2) {
-            const first = toUciFromSolution(p.solution, p.position);
-            if (first) {
-              const fen2 = applyUciMove(p.position, first);
-              if (fen2) {
-                const tail = await extendPv(fen2, Math.max(targetMin - 1, 1), targetMax - 1);
-                line = [first, ...tail];
-              } else {
-                line = [first];
-              }
-            }
-          }
-
-          if (line.length < targetMin) {
-            let cur = p.position;
-            for (const mv of line) {
-              const nf = applyUciMove(cur, mv);
-              if (!nf) { cur = null; break; }
-              cur = nf;
-            }
-            if (cur) {
-              const add = await stepwiseExtend(cur, targetMin - line.length, Math.max(targetMax - line.length, 1), 1000);
-              line = [...line, ...add];
-            }
-          }
-
-          if (line.length > 0) {
-            p.lineUci = line.slice(0, targetMax).join(' ');
-            p.startLineIndex = 0;
-          }
-          p.difficulty = 'advanced';
-          p.estimatedRating = 2000;
-          p.rating = 2000;
-          enhancedFallback.push(p);
-        } catch (e) {
-          p.difficulty = p.difficulty || 'advanced';
-          p.estimatedRating = p.estimatedRating || 2000;
-          p.rating = p.rating || 2000;
-          enhancedFallback.push(p);
-        }
-      }
-      return enhancedFallback;
+      console.error('❌ Critical error generating mistake puzzles:', error);
+      console.error('💡 Please check that games are properly imported and contain valid position data');
+      return [];
     }
   }
 
@@ -778,12 +704,278 @@ class PuzzleGenerationService {
       'learn-mistakes': [
         {
           id: 1,
-          position: 'r1bq1rk1/ppp2ppp/2n1bn2/3p4/3P4/2N1PN2/PPP2PPP/R1BQKB1R w KQ - 0 7',
-          objective: 'White to move. Find the tactical shot you missed.',
-          solution: 'Nxd5',
-          hint: 'Look for a knight fork opportunity.',
-          explanation: 'Nxd5 creates a fork, attacking both the queen and the knight on e6.',
-          source: 'curated'
+          position: '2rq1rk1/pp1bppbp/3p1np1/8/3NP3/1BN1BP2/PPPQ2PP/2KR3R w - - 0 14',
+          objective: 'White to move. Find the powerful tactical blow.',
+          solution: 'Nf5',
+          hint: 'Look for a knight sacrifice that exposes the king.',
+          explanation: 'Nf5! is a brilliant knight sacrifice. After gxf5 exf5, White has a devastating attack with the bishop pair aimed at the exposed king.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2250
+        },
+        {
+          id: 2,
+          position: 'r1b2rk1/pp3ppp/2n1p3/q1ppP3/3P4/P1PB1N2/2Q2PPP/R1B2RK1 w - - 0 15',
+          objective: 'White to move. Exploit the weak dark squares.',
+          solution: 'Bxh7+',
+          hint: 'A classic bishop sacrifice on h7.',
+          explanation: 'Bxh7+! Kxh7 Ng5+ and White wins the queen with a devastating attack.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2300
+        },
+        {
+          id: 3,
+          position: '3r2k1/p4ppp/1p2p3/nPq5/P2pPQ2/5P2/6PP/1R1R2K1 w - - 0 25',
+          objective: 'White to move. Find the winning combination.',
+          solution: 'Rxd4',
+          hint: 'Sacrifice the exchange to open lines.',
+          explanation: 'Rxd4! cxd4 Qxd4+ and White wins with the powerful centralized queen.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2350
+        },
+        {
+          id: 4,
+          position: 'r4rk1/1bq1bppp/p2ppn2/1p6/3NPP2/2N1B3/PPPQ2PP/2KR1B1R w - - 0 13',
+          objective: 'White to move. Breakthrough in the center.',
+          solution: 'Ndxb5',
+          hint: 'A knight sacrifice opens up the position.',
+          explanation: 'Ndxb5! axb5 Nxb5 and White has a strong attack against the exposed queen and weak dark squares.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2280
+        },
+        {
+          id: 5,
+          position: '2kr3r/ppp2ppp/2n1b3/4N3/2Pq4/3B4/PP3PPP/R2Q1RK1 w - - 0 15',
+          objective: 'White to move. Find the forcing sequence.',
+          solution: 'Nxf7',
+          hint: 'A knight sacrifice leads to perpetual check or better.',
+          explanation: 'Nxf7! Kxf7 Qh5+ and White has at minimum a perpetual check, but likely wins material.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2320
+        },
+        {
+          id: 6,
+          position: 'r2q1rk1/1p1bbppp/p1np1n2/4p3/P2PP3/2N1BN1P/1P2BPP1/R2Q1RK1 w - - 0 12',
+          objective: 'White to move. Exploit the pin.',
+          solution: 'd5',
+          hint: 'The knight on c6 is pinned to the queen.',
+          explanation: 'd5! wins material because the knight on c6 is pinned and cannot move without losing the queen.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2200
+        },
+        {
+          id: 7,
+          position: '2rq1rk1/1p1n1ppp/p2ppn2/6B1/3NPP2/2N5/PPP1Q1PP/2KR3R w - - 0 14',
+          objective: 'White to move. Find the tactical shot.',
+          solution: 'Nxe6',
+          hint: 'Remove the defender of the d7 knight.',
+          explanation: 'Nxe6! fxe6 Qxe6+ and White wins the knight on d7 with a strong attack.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2260
+        },
+        {
+          id: 8,
+          position: 'r1bq1rk1/pp3pbp/2np1np1/2p1p3/2P1P3/2NPBN2/PP2BPPP/R2Q1RK1 w - - 0 10',
+          objective: 'White to move. Break through with a pawn sacrifice.',
+          solution: 'd4',
+          hint: 'Open the center with a pawn break.',
+          explanation: 'd4! cxd4 Nxd4 and White has excellent piece activity and central control.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2240
+        },
+        {
+          id: 9,
+          position: '3r2k1/1bq2ppp/p3pn2/1p6/3NP3/1BP2Q2/PP3PPP/3R2K1 w - - 0 20',
+          objective: 'White to move. Find the winning move.',
+          solution: 'Nf5',
+          hint: 'Attack the weak e6 pawn and threaten the king.',
+          explanation: 'Nf5! attacks e6 and threatens Qh5, winning material or delivering checkmate.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2290
+        },
+        {
+          id: 10,
+          position: 'r2qk2r/ppp2ppp/2n1bn2/2bpp3/4P3/2PP1N2/PP1NBPPP/R1BQ1RK1 w kq - 0 9',
+          objective: 'White to move. Punish Black\'s development.',
+          solution: 'Nxe5',
+          hint: 'Win material with a tactical sequence.',
+          explanation: 'Nxe5! Nxe5 d4 and White wins a piece due to the pin on the bishop.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2270
+        },
+        {
+          id: 11,
+          position: '2r3k1/5ppp/p1q1p3/1p1pP3/3n1P2/P2B1Q1P/1P4P1/2R3K1 b - - 0 25',
+          objective: 'Black to move. Find the winning tactic.',
+          solution: 'Nf3+',
+          hint: 'A knight fork wins the queen.',
+          explanation: 'Nf3+! gxf3 Qxf3 and Black has won the queen for a knight.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2310
+        },
+        {
+          id: 12,
+          position: 'r1b1k2r/pp1n1ppp/2p1p3/q7/1b1P4/2NB1N2/PP2QPPP/R1B2RK1 w kq - 0 11',
+          objective: 'White to move. Exploit the exposed king.',
+          solution: 'Bxh7+',
+          hint: 'A classic Greek Gift sacrifice.',
+          explanation: 'Bxh7+! Kxh7 Ng5+ Kg8 Qh5 and White has a winning attack.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2330
+        },
+        {
+          id: 13,
+          position: '3r1rk1/pp3ppp/2p1b3/8/2BPq3/P3P3/1P2QPPP/R4RK1 b - - 0 18',
+          objective: 'Black to move. Find the winning combination.',
+          solution: 'Rd1',
+          hint: 'A rook sacrifice forces checkmate.',
+          explanation: 'Rd1! Rxd1 Qxf2+ Kh1 Qxf1#. A beautiful back-rank mate.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2360
+        },
+        {
+          id: 14,
+          position: 'r2q1rk1/1p1bbppp/p1nppn2/8/3NP3/2N1BP2/PPPQ2PP/2KR1B1R w - - 0 12',
+          objective: 'White to move. Find the powerful knight move.',
+          solution: 'Ndb5',
+          hint: 'Attack the weak a7 pawn and c7 square.',
+          explanation: 'Ndb5! attacks a7 and threatens Nc7, winning the exchange or forcing major concessions.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2220
+        },
+        {
+          id: 15,
+          position: '2rq1rk1/pp2bppp/2n1pn2/3p4/3P1B2/2PBPN2/PP1N1PPP/R2Q1RK1 w - - 0 12',
+          objective: 'White to move. Win material with tactics.',
+          solution: 'Bxf6',
+          hint: 'Remove the defender of the e7 bishop.',
+          explanation: 'Bxf6! Bxf6 Nxd5 and White wins a pawn with a better position.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2230
+        },
+        {
+          id: 16,
+          position: 'r1b2rk1/pp1nqppp/2p1pn2/3p4/2PP4/2N1PN2/PP2BPPP/R1BQ1RK1 w - - 0 10',
+          objective: 'White to move. Break in the center.',
+          solution: 'cxd5',
+          hint: 'Open lines for your pieces.',
+          explanation: 'cxd5! cxd5 Nb5 and White has strong pressure on the queenside.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2210
+        },
+        {
+          id: 17,
+          position: '3r2k1/p4ppp/1p2p3/2q5/P2pP3/5P2/1P1Q2PP/1R1R2K1 w - - 0 24',
+          objective: 'White to move. Find the winning move.',
+          solution: 'Qh6',
+          hint: 'Threaten checkmate on g7.',
+          explanation: 'Qh6! threatens Qg7# and Black cannot adequately defend.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2340
+        },
+        {
+          id: 18,
+          position: 'r2q1rk1/1p1b1ppp/p1n1pn2/2pp4/3P1B2/2PBPN2/PP1N1PPP/R2QK2R w KQ - 0 11',
+          objective: 'White to move. Castle or attack?',
+          solution: 'O-O',
+          hint: 'Complete development before attacking.',
+          explanation: 'O-O! brings the king to safety and connects the rooks, preparing for a kingside attack.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2190
+        },
+        {
+          id: 19,
+          position: '2r3k1/5ppp/p2qp3/1p1pP3/3n1P2/P2B1Q1P/1P4P1/2R3K1 w - - 0 24',
+          objective: 'White to move. Find the tactical blow.',
+          solution: 'Rxc8+',
+          hint: 'A rook sacrifice leads to checkmate.',
+          explanation: 'Rxc8+! Qxc8 Qf6 and White has an unstoppable mating attack.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2370
+        },
+        {
+          id: 20,
+          position: 'r1bq1rk1/pp2bppp/2nppn2/8/2BNP3/2N1B3/PPP2PPP/R2Q1RK1 w - - 0 10',
+          objective: 'White to move. Find the strong continuation.',
+          solution: 'Nxe6',
+          hint: 'A knight sacrifice opens up the position.',
+          explanation: 'Nxe6! fxe6 Bxe6+ Kh8 Qd3 and White has a winning attack.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2300
+        },
+        {
+          id: 21,
+          position: '2r2rk1/1p1qbppp/p2p1n2/4p3/4P3/1NN1BP2/PPP1Q1PP/2KR3R w - - 0 15',
+          objective: 'White to move. Find the winning tactic.',
+          solution: 'Nd5',
+          hint: 'Centralize the knight with tempo.',
+          explanation: 'Nd5! Nxd5 exd5 and White has a powerful passed pawn and better position.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2250
+        },
+        {
+          id: 22,
+          position: 'r2q1rk1/1p1bbppp/p1nppn2/8/2BNP3/2N1BP2/PPPQ2PP/2KR3R w - - 0 13',
+          objective: 'White to move. Sacrifice for attack.',
+          solution: 'Nxe6',
+          hint: 'Remove the key defender.',
+          explanation: 'Nxe6! fxe6 Bxe6+ Kh8 Qd3 and White has a devastating attack on the dark squares.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2320
+        },
+        {
+          id: 23,
+          position: '3r2k1/pp3ppp/2p1b3/8/2BPq3/P3P3/1P2QPPP/R4RK1 w - - 0 19',
+          objective: 'White to move. Defend accurately.',
+          solution: 'Qf2',
+          hint: 'Trade queens to neutralize the attack.',
+          explanation: 'Qf2! offers a queen trade that eliminates Black\'s attacking chances.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2200
+        },
+        {
+          id: 24,
+          position: 'r1b1k2r/pp1nqppp/2p1pn2/3p4/2PP4/2N1PN2/PP2BPPP/R1BQK2R w KQkq - 0 9',
+          objective: 'White to move. Castle or develop?',
+          solution: 'O-O',
+          hint: 'King safety is paramount.',
+          explanation: 'O-O! completes development and prepares for central action.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2180
+        },
+        {
+          id: 25,
+          position: '2rq1rk1/1p1bbppp/p1nppn2/8/3NP3/2N1BP2/PPPQB1PP/2KR3R w - - 0 13',
+          objective: 'White to move. Find the breakthrough.',
+          solution: 'Nxe6',
+          hint: 'A knight sacrifice destroys Black\'s pawn structure.',
+          explanation: 'Nxe6! fxe6 Bg4 and White has tremendous pressure on the weakened kingside.',
+          source: 'curated',
+          difficulty: 'advanced',
+          estimatedRating: 2310
         }
       ],
       'master-openings': [

@@ -63,14 +63,14 @@ class StockfishAnalyzer {
     }
   }
 
-  // Enhanced deep analysis of a single position (minimum 18-move depth)
-  async analyzePositionDeep(fen, depth = 20, timeLimit = 5000) {
+  // Enhanced deep analysis of a single position
+  async analyzePositionDeep(fen, depth = 10, timeLimit = 400) {
     if (!this.isReady) {
       await this.initialize();
     }
 
-    // Ensure minimum depth for production-level analysis
-    const actualDepth = Math.max(depth, 18);
+    // Use provided depth (optimized for speed)
+    const actualDepth = depth;
 
     return new Promise((resolve, reject) => {
       let bestMove = null;
@@ -205,27 +205,26 @@ class StockfishAnalyzer {
   }
 
   // Legacy method for backward compatibility
-  async analyzePosition(fen, depth = 15, timeLimit = 3000) {
-    // For backward compatibility, redirect to deep analysis with minimum depth
-    const actualDepth = Math.max(depth, 18);
-    return this.analyzePositionDeep(fen, actualDepth, timeLimit);
+  async analyzePosition(fen, depth = 10, timeLimit = 400) {
+    // For backward compatibility, redirect to deep analysis
+    return this.analyzePositionDeep(fen, depth, timeLimit);
   }
 
   // Enhanced deep analysis of multiple key positions
   async analyzePositions(fenPositions, options = {}) {
     const {
-      depth = 20, // Increased default depth for production-level analysis
-      timeLimit = 5000, // Increased time limit for deeper analysis
+      depth = 10, // Optimized default depth for speed
+      timeLimit = 400, // Optimized time limit for faster analysis
       onProgress = () => {},
       maxPositions = fenPositions.length,
       prioritizeKeyPositions = true,
-      concurrency = 1 // NEW: light concurrency support
+      concurrency = 1 // NEW: concurrency support (up to 4 workers)
     } = options;
 
-    // Ensure minimum depth for production analysis
-    const actualDepth = Math.max(depth, 18);
+    // Use provided depth (no minimum enforcement for speed optimization)
+    const actualDepth = depth;
     const actualMaxPositions = Math.min(fenPositions.length, maxPositions);
-    const poolSize = Math.max(1, Math.min(2, concurrency));
+    const poolSize = Math.max(1, Math.min(4, concurrency));
     
     console.log(`🎯 Starting deep Stockfish analysis (depth ${actualDepth})...`);
     console.log(`📊 Analyzing ${actualMaxPositions} key positions from ${fenPositions.length} total`);
@@ -297,17 +296,23 @@ class StockfishAnalyzer {
     if (poolSize === 1) {
       await runSequential();
     } else {
-      // Light concurrency pool (size 2)
+      // Optimized concurrency pool (supports 2-4 workers)
       const total = positionsToAnalyze.length;
 
-      // Create a second lightweight analyzer instance with adjusted threads
+      // Create multiple lightweight analyzer instances with adjusted threads
       const cores = Math.max(1, (navigator.hardwareConcurrency || 2));
       const perWorkerThreads = Math.max(1, Math.floor(Math.min(4, cores) / poolSize));
 
-      // Lazy import class to spawn a sibling instance
+      // Lazy import class to spawn sibling instances
       const { StockfishAnalyzer } = await import('./stockfishAnalysis');
-      const sibling = new StockfishAnalyzer({ threads: perWorkerThreads, hash: this.config?.hash || 16 });
-      await sibling.initialize();
+      const siblings = [];
+      
+      // Create poolSize-1 additional workers (this instance is worker 0)
+      for (let i = 1; i < poolSize; i++) {
+        const sibling = new StockfishAnalyzer({ threads: perWorkerThreads, hash: this.config?.hash || 16 });
+        await sibling.initialize();
+        siblings.push(sibling);
+      }
 
       // Current instance: also adjust threads to avoid oversubscription
       this.config.threads = perWorkerThreads;
@@ -343,14 +348,18 @@ class StockfishAnalyzer {
         }
       };
 
-      // Start both loops in parallel
-      await Promise.all([
-        workerLoop(this, 'A'),
-        workerLoop(sibling, 'B')
-      ]);
+      // Start all worker loops in parallel
+      const workerLabels = ['A', 'B', 'C', 'D'];
+      const workerPromises = [workerLoop(this, workerLabels[0])];
+      
+      for (let i = 0; i < siblings.length; i++) {
+        workerPromises.push(workerLoop(siblings[i], workerLabels[i + 1]));
+      }
+      
+      await Promise.all(workerPromises);
 
-      // Cleanup sibling worker
-      sibling.terminate();
+      // Cleanup sibling workers
+      siblings.forEach(sibling => sibling.terminate());
     }
 
     const totalTime = (Date.now() - startTime) / 1000;

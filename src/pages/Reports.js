@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { ChevronDown, User, Hash, BarChart3, Loader2, Check, CheckCircle, XCircle } from 'lucide-react';
+import { ChevronDown, User, Hash, BarChart3, Loader2, Check, CheckCircle, XCircle, Crown, Lock } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 import { useNavigate } from 'react-router-dom';
 import LoadingScreen from '../components/LoadingScreen';
+import { useAuth } from '../contexts/AuthContext';
+import { useUserProfile } from '../hooks/useUserProfile';
+import userProfileService from '../services/userProfileService';
 import { 
   fetchChessComGamesEnhanced, 
   fetchLichessGamesEnhanced, 
@@ -20,6 +23,8 @@ import {
 } from '../utils/geminiStockfishAnalysis';
 import puzzleDataService from '../services/puzzleDataService';
 import mistakeAnalysisService from '../services/mistakeAnalysisService';
+import reportService from '../services/reportService';
+import { validateAndEnforceGameDiversity, enhancePromptWithGameDiversity } from '../utils/gameDiversityValidator';
 
 // Calculate dynamic statistics from actual games
 const calculateGameStatistics = (gamesData, formData) => {
@@ -122,7 +127,16 @@ const calculateGameStatistics = (gamesData, formData) => {
 
 const Reports = () => {
   const navigate = useNavigate();
-  
+  const { user } = useAuth();
+  const { 
+    profile, 
+    loading: profileLoading,
+    canGenerateFreeReport,
+    hasActiveSubscription,
+    hasClaimedFreeReport,
+    getSubscriptionTier,
+    refreshProfile
+  } = useUserProfile();
   const [formData, setFormData] = useState({
     platform: '',
     username: '',
@@ -678,6 +692,23 @@ EXPLANATION STYLE: Use precise chess terminology. Include deep strategic and tac
     // Check if user validation is required
     if (userValidationStatus !== 'valid') {
       toast.error('Please validate the username first by clicking "Validate User"');
+          return;
+    }
+
+    // ✅ PHASE 2: Check authentication
+    if (!user) {
+      toast.error('Please sign in to generate a report');
+      navigate('/auth');
+      return;
+    }
+
+    // ✅ PHASE 2: Check if user can generate a report
+    const canGenerate = canGenerateFreeReport();
+    const hasSubscription = hasActiveSubscription();
+
+    if (!canGenerate && !hasSubscription) {
+      toast.error('You have already used your free report. Please subscribe to generate more reports.');
+      // TODO: Navigate to pricing page when implemented in Phase 4
       return;
     }
 
@@ -810,7 +841,7 @@ EXPLANATION STYLE: Use precise chess terminology. Include deep strategic and tac
       
 
       
-      // STAGE 4: AI Analysis (60% - 100%)
+      // STAGE 4: Comprehensive AI Analysis with staged loading (60% - 100%)
       setProgressStage('analyzing');
       setProgressPercent(60);
       
@@ -832,14 +863,53 @@ EXPLANATION STYLE: Use precise chess terminology. Include deep strategic and tac
           gameData: fetchedGames,
           fenPositions: allGamesFenData.flatMap(game => game.fenPositions),
           allGamesFenData: allGamesFenData, // ✅ Add complete FEN data per game
-          username: formData.username // ✅ Also store the username
+          username: formData.username, // ✅ Also store the username
+          recurringWeaknesses: analysisResult?.recurringWeaknesses || []
         };
         
         setProgressPercent(100);
-        
+               
+        // ✅ PHASE 2: Claim free report if this is the user's first report
+        if (user && !hasClaimedFreeReport() && !hasActiveSubscription()) {
+          try {
+            console.log('📝 Claiming free report for user:', user.id);
+            await userProfileService.claimFreeReport(user.id);
+            await refreshProfile(); // Refresh profile to update UI
+            console.log('✅ Free report claimed successfully');
+          } catch (claimError) {
+            console.error('❌ Failed to claim free report:', claimError);
+            // Don't block navigation if claim fails
+          }
+        }
+
+        // ✅ PHASE 3: Save report to Supabase for puzzle access control
+        let reportId = null;
+        if (user) {
+          try {
+            console.log('💾 Saving report to Supabase...');
+            const savedReport = await reportService.saveReport(
+              user.id,
+              completeAnalysisResult,
+              formData.platform,
+              formData.username
+            );
+            reportId = savedReport.id;
+            console.log('✅ Report saved to Supabase with ID:', reportId);
+            
+            // Add reportId to analysis result for puzzle generation
+            completeAnalysisResult.reportId = reportId;
+          } catch (saveError) {
+            console.error('❌ Failed to save report to Supabase:', saveError);
+            // Don't block navigation if save fails - puzzles will work without access control
+          }
+        }
+
         // Navigate to the report display page with the complete analysis data
         navigate('/report-display', { 
-          state: { analysis: completeAnalysisResult }
+          state: { 
+            analysis: completeAnalysisResult,
+            recurringWeaknesses: completeAnalysisResult.recurringWeaknesses
+          }
         });
         
       } catch (analysisError) {
@@ -873,10 +943,13 @@ EXPLANATION STYLE: Use precise chess terminology. Include deep strategic and tac
       const preparedFenData = prepareFenDataForRecurringWeaknessAnalysis(games, fenData, formData);
       
       // Create the Pawnsposes prompt for recurring weaknesses
-      const prompt = createRecurringWeaknessPrompt(preparedFenData, formData);
+      const basePrompt = createRecurringWeaknessPrompt(preparedFenData, formData);
       
-      // Call Gemini API
-      const result = await callGeminiForRecurringWeaknesses(prompt);
+      // ✅ ENHANCED: Add game diversity requirements to prompt
+      const enhancedPrompt = enhancePromptWithGameDiversity(basePrompt, preparedFenData);
+      
+      // Call Gemini API with prepared data for validation
+      const result = await callGeminiForRecurringWeaknesses(enhancedPrompt, preparedFenData);
       
       console.log('✅ Recurring weaknesses analysis completed');
       return result;
@@ -2083,7 +2156,24 @@ Keep examples concise and actionable.
         return fallbackWeaknesses;
       }
       
-      return weaknesses;
+      console.log('🎯 GAME DIVERSITY RESULTS:');
+  console.log(`   Total weaknesses: ${weaknesses.length}`);
+  console.log(`   Unique opponents: ${usedOpponents.size}`);
+  console.log(`   Duplicate indices: [${duplicateGameIndices.join(', ')}]`);
+  console.log(`   Used opponents: [${Array.from(usedOpponents).join(', ')}]`);
+  
+  // Log each weakness for debugging
+  weaknesses.forEach((weakness, index) => {
+    console.log(`   Weakness ${index + 1}: "${weakness.title}"`);
+    console.log(`   Game Info: "${weakness.gameInfo}"`);
+  });
+  
+  // TODO: Actually handle duplicates by requesting different examples from Gemini
+  if (duplicateGameIndices.length > 0) {
+    console.log('⚠️ WARNING: Found duplicate games but not handling them yet. This is why examples are from the same game!');
+  }
+  
+  return weaknesses;
       
     } catch (error) {
       console.error('❌ Error parsing weakness response:', error);
@@ -2189,8 +2279,68 @@ Keep examples concise and actionable.
   }
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] font-['-apple-system','BlinkMacSystemFont','SF Pro Display','Helvetica Neue','Arial','sans-serif'] pt-20 px-4">
-      <div className="flex justify-center items-center min-h-[calc(100vh-5rem)] py-4">
+    <div className="min-h-screen bg-[#F8F9FA] font-['-apple-system','BlinkMacSystemFont','SF Pro Display','Helvetica Neue','Arial','sans-serif'] pt-24 px-4 pb-8">
+      
+      {/* ✅ PHASE 2: Subscription Status Banner */}
+      {user && !profileLoading && (
+        <div className="max-w-4xl mx-auto mb-5 mt-3">
+          {!hasActiveSubscription() ? (
+            // Free tier user
+            hasClaimedFreeReport() ? (
+              // Free report already used - show upgrade prompt
+              <div className="bg-gradient-to-r from-orange-50 to-amber-50 border-2 border-orange-200 rounded-xl p-4 shadow-md">
+                <div className="flex items-center justify-between flex-wrap gap-4">
+                  <div className="flex items-center gap-3">
+                    <Lock className="w-5 h-5 text-orange-600" />
+                    <div>
+                      <p className="font-semibold text-gray-800">Free Report Used</p>
+                      <p className="text-sm text-gray-600">Subscribe to generate unlimited reports and access personalized puzzles</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => navigate('/pricing')}
+                    className="px-6 py-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-semibold rounded-lg hover:from-orange-600 hover:to-amber-600 transition-all shadow-md hover:shadow-lg"
+                  >
+                    View Plans
+                  </button>
+                </div>
+              </div>
+            ) : (
+              // Free report still available
+              <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-xl p-4 shadow-md">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 bg-green-500 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                    1
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800">Free Report Available</p>
+                    <p className="text-sm text-gray-600">You have 1 free report remaining. Subscribe for unlimited access!</p>
+                  </div>
+                </div>
+              </div>
+            )
+          ) : (
+            // Subscribed user
+            <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border-2 border-purple-200 rounded-xl p-4 shadow-md">
+              <div className="flex items-center gap-3">
+                <Crown className="w-5 h-5 text-purple-600" />
+                <div>
+                  <p className="font-semibold text-gray-800">
+                    {getSubscriptionTier().charAt(0).toUpperCase() + getSubscriptionTier().slice(1)} Plan Active
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    {profile?.subscription_expires_at 
+                      ? `Expires: ${new Date(profile.subscription_expires_at).toLocaleDateString()}`
+                      : 'Unlimited reports and personalized puzzles'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="flex justify-center items-start py-4">
       <style jsx>{`
         :root {
           --primary-color: #E9823A;
@@ -2222,7 +2372,7 @@ Keep examples concise and actionable.
         .steps-container {
           display: flex;
           justify-content: space-around;
-          margin-bottom: 2.5rem;
+          margin-bottom: 2rem;
           gap: 1rem;
           padding: 0;
           flex-wrap: wrap;
@@ -2230,8 +2380,8 @@ Keep examples concise and actionable.
         
         .step {
           flex: 1;
-          min-width: 200px;
-          padding: 1.5rem 1rem;
+          min-width: 190px;
+          padding: 1.25rem 1rem;
           background: linear-gradient(135deg, #FFF9F5 0%, #FFFFFF 100%);
           backdrop-filter: blur(10px);
           -webkit-backdrop-filter: blur(10px);
@@ -2247,7 +2397,7 @@ Keep examples concise and actionable.
         }
         
         .step .number {
-          font-size: 2.2rem;
+          font-size: 2rem;
           font-weight: 600;
           color: var(--primary-color);
           line-height: 1;
@@ -2255,16 +2405,16 @@ Keep examples concise and actionable.
         }
         
         .step h3 {
-          font-size: 1.1rem;
+          font-size: 1.05rem;
           font-weight: 600;
-          margin-top: 0.8rem;
-          margin-bottom: 0.3rem;
+          margin-top: 0.75rem;
+          margin-bottom: 0.35rem;
           color: var(--text-color);
           font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
         }
         
         .step p {
-          font-size: 0.95rem;
+          font-size: 0.9rem;
           color: var(--text-light-color);
           margin: 0;
           line-height: 1.4;
@@ -2331,7 +2481,7 @@ Keep examples concise and actionable.
         .input-row {
           display: flex;
           gap: 1rem;
-          margin-bottom: 1.5rem;
+          margin-bottom: 1.25rem;
           flex-wrap: wrap;
         }
         
@@ -2517,7 +2667,7 @@ Keep examples concise and actionable.
         /* Mobile Responsive Styles */
         @media (max-width: 768px) {
           .card {
-            padding: 1.5rem;
+            padding: 1.25rem;
             margin: 0 0.5rem;
             max-width: calc(100vw - 1rem);
           }
@@ -2525,16 +2675,16 @@ Keep examples concise and actionable.
           .steps-container {
             flex-direction: column;
             gap: 1rem;
-            margin-bottom: 2rem;
+            margin-bottom: 1.5rem;
           }
           
           .step {
             min-width: auto;
-            padding: 1.25rem;
+            padding: 1rem;
           }
           
           .step .number {
-            font-size: 1.8rem;
+            font-size: 1.7rem;
           }
           
           .step h3 {
@@ -2542,7 +2692,7 @@ Keep examples concise and actionable.
           }
           
           .step p {
-            font-size: 0.9rem;
+            font-size: 0.875rem;
           }
           
           .platform-selection {
@@ -2586,27 +2736,27 @@ Keep examples concise and actionable.
 
         @media (max-width: 480px) {
           .card {
-            padding: 1.25rem;
+            padding: 1.5rem;
             margin: 0 0.25rem;
             border-radius: 15px;
           }
           
           h1 {
-            font-size: 2rem !important;
+            font-size: 2.1rem !important;
             line-height: 1.2 !important;
           }
           
           h2 {
-            font-size: 1.1rem !important;
+            font-size: 1.15rem !important;
             margin-bottom: 1.5rem !important;
           }
           
           .step {
-            padding: 1rem;
+            padding: 1.1rem;
           }
           
           .step .number {
-            font-size: 1.6rem;
+            font-size: 1.7rem;
           }
           
           .username-input,
@@ -2634,7 +2784,7 @@ Keep examples concise and actionable.
           className="card"
         >
           <h1 style={{ 
-            fontSize: '2.5rem', 
+            fontSize: '2.4rem', 
             fontWeight: 700, 
             color: 'var(--primary-color)', 
             lineHeight: 1.1, 
@@ -2645,9 +2795,9 @@ Keep examples concise and actionable.
             Stop Guessing. Start Improving.
           </h1>
           <h2 style={{ 
-            fontSize: '1.3rem', 
+            fontSize: '1.2rem', 
             fontWeight: 400, 
-            marginBottom: '2rem', 
+            marginBottom: '1.75rem', 
             color: 'var(--text-light-color)',
             fontFamily: '-apple-system, BlinkMacSystemFont, SF Pro Text, sans-serif'
           }}>
@@ -5000,7 +5150,7 @@ IMPORTANT: Return ONLY the JSON object above. No additional text, explanations, 
 };
 
 // ? NEW: Call Gemini API for recurring weaknesses analysis
-const callGeminiForRecurringWeaknesses = async (prompt) => {
+const callGeminiForRecurringWeaknesses = async (prompt, preparedFenData) => {
   const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
   
   if (!apiKey) {
@@ -5056,7 +5206,10 @@ const callGeminiForRecurringWeaknesses = async (prompt) => {
         throw new Error('Invalid JSON structure - missing weaknesses array');
       }
       
-      return jsonResult;
+      // ? NEW: Apply game diversity validation
+      const validatedResult = validateAndEnforceGameDiversity(jsonResult, preparedFenData);
+      
+      return validatedResult;
       
     } catch (parseError) {
       console.error('Failed to parse JSON response:', parseError);

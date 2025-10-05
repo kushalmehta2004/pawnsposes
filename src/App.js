@@ -19,6 +19,7 @@ import PuzzlePage from './pages/PuzzlePage';
 import PuzzleDataTest from './components/PuzzleDataTest';
 import MistakeAnalysisTest from './components/MistakeAnalysisTest';
 import Phase2Summary from './components/Phase2Summary';
+import ProfileTest from './components/ProfileTest';
 import DarkModeToggle from './components/DarkModeToggle';
 import './App.css';
 
@@ -26,7 +27,7 @@ import './App.css';
 const ThemeToggleOnRoutes = () => {
   const location = useLocation();
   const p = location.pathname;
-  const isAllowed = p === '/report-display' || p === '/full-report' || p.startsWith('/puzzle/');
+  const isAllowed = p === '/report-display' || p === '/full-report' || p === '/my-reports' || p.startsWith('/puzzle/');
 
   // Guard: ensure dark class is removed when navigating away from allowed routes
   useEffect(() => {
@@ -75,6 +76,7 @@ function App() {
               <Route path="/puzzle-test" element={<PuzzleDataTest />} />
               <Route path="/mistake-analysis-test" element={<MistakeAnalysisTest />} />
               <Route path="/phase2-summary" element={<Phase2Summary />} />
+              <Route path="/profile-test" element={<ProfileTest />} />
               <Route path="/contact" element={<Contact />} />
             </Routes>
           </main>

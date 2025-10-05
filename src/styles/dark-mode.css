@@ -205,3 +205,69 @@
 .dark-mode .page-container .page .section-header i {
   color: #34D399 !important; /* lighter emerald icon */
 }
+
+/* MyReports Page: Dark mode overrides */
+.dark-mode .bg-gradient-to-br {
+  background: #18181B !important; /* solid dark background instead of gradient */
+}
+
+.dark-mode .hover\:bg-gray-50:hover {
+  background-color: #2C2C2C !important;
+}
+
+.dark-mode .text-gray-800 {
+  color: #EAEAEA !important;
+}
+
+.dark-mode .text-gray-400 {
+  color: #AAAAAA !important;
+}
+
+/* MyReports: Keep colored badges vibrant in dark mode */
+.dark-mode .bg-blue-100 {
+  background-color: #1E3A8A !important;
+}
+.dark-mode .text-blue-800 {
+  color: #93C5FD !important;
+}
+.dark-mode .bg-green-100 {
+  background-color: #14532D !important;
+}
+.dark-mode .text-green-800 {
+  color: #86EFAC !important;
+}
+.dark-mode .bg-purple-100 {
+  background-color: #581C87 !important;
+}
+.dark-mode .text-purple-800 {
+  color: #D8B4FE !important;
+}
+.dark-mode .bg-orange-100 {
+  background-color: #7C2D12 !important;
+}
+.dark-mode .text-orange-800 {
+  color: #FED7AA !important;
+}
+
+/* MyReports: Action buttons - keep their vibrant colors */
+.dark-mode .bg-blue-600 {
+  background-color: #2563EB !important;
+}
+.dark-mode .bg-blue-600:hover,
+.dark-mode .hover\:bg-blue-700:hover {
+  background-color: #1D4ED8 !important;
+}
+.dark-mode .bg-red-600 {
+  background-color: #DC2626 !important;
+}
+.dark-mode .bg-red-600:hover,
+.dark-mode .hover\:bg-red-700:hover {
+  background-color: #B91C1C !important;
+}
+.dark-mode .bg-green-600 {
+  background-color: #16A34A !important;
+}
+.dark-mode .bg-green-600:hover,
+.dark-mode .hover\:bg-green-700:hover {
+  background-color: #15803D !important;
+}

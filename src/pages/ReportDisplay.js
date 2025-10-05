@@ -1,49 +1,91 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { BarChart3, AlertCircle, ArrowLeft, Download, Share2 } from 'lucide-react';
+import { BarChart3, AlertCircle, ArrowLeft, Download, Share2, Lock, Unlock } from 'lucide-react'
 import { toast } from 'react-hot-toast';
 import puzzleGenerationService from '../services/puzzleGenerationService';
 import { initializePuzzleDatabase, getPuzzleDatabase } from '../utils/puzzleDatabase';
 import puzzleDataService from '../services/puzzleDataService';
+import puzzleAccessService from '../services/puzzleAccessService';
+import { useAuth } from '../contexts/AuthContext';
 // Simple in-memory cache to persist report sections across route toggles (resets on reload)
 let REPORT_DISPLAY_CACHE = {
   key: null,
   performanceMetrics: null,
   recurringWeaknesses: null,
+  puzzlesGenerated: new Set(), // Track which users have had puzzles generated
 };
 const ReportDisplay = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [analysis, setAnalysis] = useState(null);
-  const [performanceMetrics, setPerformanceMetrics] = useState(null);
+  const [performanceMetrics, setPerformanceMetrics] = useState(location.state?.performanceMetrics || null);
   const [isCalculatingMetrics, setIsCalculatingMetrics] = useState(false);
-  const [recurringWeaknesses, setRecurringWeaknesses] = useState(null);
+  const [recurringWeaknesses, setRecurringWeaknesses] = useState(location.state?.recurringWeaknesses || null);
   const [isAnalyzingWeaknesses, setIsAnalyzingWeaknesses] = useState(false);
-  const [phaseReview, setPhaseReview] = useState(null);
-  const [positionalStudy, setPositionalStudy] = useState(null);
-  const [videoRec, setVideoRec] = useState(null);
-  const [isPrewarmingPuzzles, setIsPrewarmingPuzzles] = useState(false);
+  const [phaseReview, setPhaseReview] = useState(location.state?.phaseReview || null);
+  const [positionalStudy, setPositionalStudy] = useState(location.state?.positionalStudy || null);
+  const [videoRec, setVideoRec] = useState(location.state?.videoRec || null);
+  const [actionPlan, setActionPlan] = useState(location.state?.actionPlan || null);
+
+
+  // ✅ PHASE 3 STEP 4: Puzzle access control state
+  const [puzzleAccessData, setPuzzleAccessData] = useState({
+    totalPuzzles: 0,
+    freePuzzles: 0,
+    lockedPuzzles: 0,
+    hasActiveSubscription: false,
+    hasOneTimeUnlock: false
+  });
+  const [isLoadingAccessData, setIsLoadingAccessData] = useState(false);
 
   // Background pre-generation of puzzles for Fix My Weaknesses and Learn From My Mistakes
   const prewarmUserPuzzles = async (analysisData) => {
     try {
       const username = analysisData?.username || analysisData?.rawAnalysis?.username || analysisData?.formData?.username;
       if (!username || username === 'Unknown') return;
+      // ✅ PHASE 3: Extract userId and reportId for puzzle access control
+      const userId = user?.id;
+      const reportId = analysisData?.reportId;
+      
+      // Add to analysisData for use in puzzle storage
+      analysisData.userId = userId;
+      analysisData.reportId = reportId;
+
+      // Check if puzzles were already generated for this user in this session
+      if (REPORT_DISPLAY_CACHE.puzzlesGenerated.has(username)) {
+        console.log(`♻️ Puzzles already generated for ${username} in this session - skipping regeneration`);
+        return;
+      }
+
+      // CRITICAL: Mark as generated IMMEDIATELY to prevent concurrent calls
+      REPORT_DISPLAY_CACHE.puzzlesGenerated.add(username);
+      console.log(`🔒 Locked puzzle generation for ${username} - preventing concurrent calls`);
 
       // Disable prewarm cache for fix-weaknesses; only prewarm learn-mistakes if desired
       await initializePuzzleDatabase();
       const db = getPuzzleDatabase();
-      const version = 'v3-fill20';
+      const version = 'v11-adaptive-4to16plies';  // Updated: Adaptive strategy (4-16 plies)
       const keyFor = (type) => `pawnsposes:puzzles:${username}:${type}:${version}`;
 
       const cachedLearn = await db.getSetting(keyFor('learn-mistakes'), null);
 
+      // If puzzles already exist in cache, skip generation
+      if (cachedLearn?.puzzles?.length >= 20) {
+        console.log(`♻️ Found ${cachedLearn.puzzles.length} cached puzzles for ${username} - using cached version`);
+        return;
+      }
+
       // Generate both sets; do not cache weaknesses
+      // MANDATORY: Generate at least 20 multi-move puzzles for "Learn From Mistakes"
+      console.log(`🧩 Starting puzzle generation for ${username}...`);
       const [weakSet, learnSetRaw] = await Promise.all([
         puzzleGenerationService.generateWeaknessPuzzles(username, { maxPuzzles: 20 }),
-        cachedLearn?.puzzles?.length ? Promise.resolve(cachedLearn.puzzles) : puzzleGenerationService.generateMistakePuzzles(username, { maxPuzzles: 20 })
+        puzzleGenerationService.generateMistakePuzzles(username, { maxPuzzles: 20 })
       ]);
+
+      console.log(`📊 Generated ${learnSetRaw?.length || 0} mistake puzzles for ${username}`);
 
       // Make learn-mistakes distinct from fix-weaknesses
       const tok = (s) => String(s || '').split(/\s+/).filter(Boolean);
@@ -51,20 +93,104 @@ const ReportDisplay = () => {
       const weakKeys = new Set(Array.isArray(weakSet) ? weakSet.map(keyOf) : []);
       const learnDistinct = Array.isArray(learnSetRaw) ? learnSetRaw.filter(p => !weakKeys.has(keyOf(p))) : [];
 
-      // Only cache learn-mistakes
-      if (!cachedLearn?.puzzles?.length) {
+     // CRITICAL: Only cache if we have at least 20 puzzles
+      if (learnDistinct.length >= 20) {
+        console.log(`💾 Caching ${learnDistinct.length} distinct mistake puzzles for ${username}`);
+
+        // Only cache learn-mistakes
         const metadata = {
           title: 'Learn From My Mistakes',
           subtitle: 'Puzzles from your mistakes',
           description: 'Practice positions created from your own mistakes.'
         };
         await db.saveSetting(keyFor('learn-mistakes'), { puzzles: learnDistinct, metadata, savedAt: Date.now() });
+        
+        console.log(`✅ Puzzle generation and caching complete for ${username} - ${learnDistinct.length} puzzles saved`);
+        // ✅ PHASE 3: Store puzzle metadata in Supabase for access control
+        const userId = analysisData?.userId;
+        const reportId = analysisData?.reportId;
+        
+        if (userId && reportId) {
+          try {
+            console.log('💾 Storing puzzle metadata in Supabase for access control...');
+            
+            // Combine all puzzles (weakness + mistake puzzles)
+            const allPuzzles = [...(Array.isArray(weakSet) ? weakSet : []), ...learnDistinct];
+            
+            // Store puzzles with access control (1 teaser per category)
+            await puzzleAccessService.storePuzzlesBatch(
+              userId,
+              reportId,
+              allPuzzles,
+              1 // Number of teaser puzzles per category
+            );
+            
+            console.log(`✅ Stored ${allPuzzles.length} puzzles in Supabase with access control`);
+          } catch (supabaseError) {
+            console.error('❌ Failed to store puzzles in Supabase:', supabaseError);
+            // Don't block the flow if Supabase storage fails
+          }
+        } else {
+          console.warn('⚠️ Missing userId or reportId - skipping Supabase puzzle storage');
+        }
+      } else {
+        console.warn(`⚠️ Only generated ${learnDistinct.length} puzzles - NOT caching (need 20 minimum)`);
+        console.warn(`💡 Import more games to generate the full set of 20 puzzles`);
+        // Remove lock so it can be retried with more games
+        REPORT_DISPLAY_CACHE.puzzlesGenerated.delete(username);
       }
     } catch (e) {
       console.warn('⚠️ Background puzzle prewarm failed (continuing without blocking):', e);
+      // Remove from cache on error so it can be retried
+      const username = analysisData?.username || analysisData?.rawAnalysis?.username || analysisData?.formData?.username;
+      if (username) {
+        REPORT_DISPLAY_CACHE.puzzlesGenerated.delete(username);
+      }
     }
   };
 
+  // ✅ PHASE 3 STEP 4: Load puzzle access data from Supabase
+  const loadPuzzleAccessData = async () => {
+    if (!user?.id || !analysis?.reportId) {
+      console.log('⚠️ Missing user ID or report ID - skipping puzzle access data load');
+      return;
+    }
+
+    setIsLoadingAccessData(true);
+    try {
+      const reportId = analysis.reportId;
+      
+      // Get puzzle counts by lock status
+      const puzzleSummary = await puzzleAccessService.getPuzzleSummary(user.id, reportId);
+      
+      // Check if user has one-time unlock for this report
+      const hasUnlock = await puzzleAccessService.checkOneTimeUnlock(user.id, reportId);
+      
+      // Check if user has active subscription (from user profile)
+      const hasSubscription = user?.subscription_status === 'active' || false;
+      
+      setPuzzleAccessData({
+        totalPuzzles: puzzleSummary.total || 0,
+        freePuzzles: puzzleSummary.free || 0,
+        lockedPuzzles: puzzleSummary.locked || 0,
+        hasActiveSubscription: hasSubscription,
+        hasOneTimeUnlock: hasUnlock
+      });
+      
+      console.log('✅ Loaded puzzle access data:', {
+        total: puzzleSummary.total,
+        free: puzzleSummary.free,
+        locked: puzzleSummary.locked,
+        hasSubscription,
+        hasUnlock
+      });
+    } catch (error) {
+      console.error('❌ Failed to load puzzle access data:', error);
+      // Don't block the UI if this fails
+    } finally {
+      setIsLoadingAccessData(false);
+    }
+  };
 
   const handleBackToReports = () => {
     navigate('/reports');
@@ -72,6 +198,27 @@ const ReportDisplay = () => {
 
   const handleDownloadPDF = () => {
     window.print();
+  };
+
+  // Helper to get puzzle access info for a category
+  const getPuzzleAccessInfo = (category) => {
+    if (!puzzleAccessData || !puzzleAccessData.byCategory) {
+      return { total: 0, free: 0, locked: 0, hasAccess: false };
+    }
+
+    const categoryData = puzzleAccessData.byCategory[category] || { total: 0, free: 0, locked: 0 };
+    const hasAccess = puzzleAccessData.hasSubscription || puzzleAccessData.hasOneTimeUnlock;
+
+    return {
+      ...categoryData,
+      hasAccess
+    };
+  };
+
+  // Handle unlock all puzzles click
+  const handleUnlockAllPuzzles = () => {
+    // TODO: Integrate with Stripe payment flow
+    toast.success('Payment integration coming soon!');
   };
 
   useEffect(() => {
@@ -92,9 +239,9 @@ const ReportDisplay = () => {
 
     setAnalysis(analysisData);
 
-        // Cache key based on user/report identity
-    const cacheKey = analysisData?.username || analysisData?.rawAnalysis?.username || analysisData?.formData?.username || 'unknown';
-
+    // Cache key based on user/report identity
+    const username = analysisData?.username || analysisData?.rawAnalysis?.username || analysisData?.formData?.username;
+    const cacheKey = username || 'unknown';
     // Restore from in-memory cache first to avoid any flicker/refetch
     if (REPORT_DISPLAY_CACHE.key === cacheKey) {
       if (REPORT_DISPLAY_CACHE.performanceMetrics) {
@@ -123,6 +270,9 @@ const ReportDisplay = () => {
     if (location.state?.videoRec) {
       setVideoRec(location.state.videoRec);
     }
+    if (location.state?.actionPlan) {
+      setActionPlan(location.state.actionPlan);
+    }
         // Only calculate if nothing is available yet (and not present in cache)
     const hasMetrics = REPORT_DISPLAY_CACHE.key === cacheKey && !!REPORT_DISPLAY_CACHE.performanceMetrics;
     const hasWeaknesses = REPORT_DISPLAY_CACHE.key === cacheKey && !!REPORT_DISPLAY_CACHE.recurringWeaknesses;
@@ -130,13 +280,17 @@ const ReportDisplay = () => {
       calculatePerformanceMetrics(analysisData);
     }
   
-    // Kick off background puzzle pre-generation once per mount
-    if (!isPrewarmingPuzzles) {
-      setIsPrewarmingPuzzles(true);
-      // Fire-and-forget to avoid blocking UI. Errors are internally handled.
+    // Kick off background puzzle pre-generation ONLY ONCE per user
+    // The function has internal checks to prevent duplicate generation
+    if (analysisData && username && username !== 'Unknown') {
       prewarmUserPuzzles(analysisData);
+      }
+
+    // Load puzzle access data when analysis is available
+    if (analysisData && analysisData.reportId) {
+      loadPuzzleAccessData(analysisData.reportId);
     }
-  }, [location.state?.analysis, location.state?.performanceMetrics, performanceMetrics, navigate, isPrewarmingPuzzles]);
+  }, [location.state?.analysis, location.state?.performanceMetrics, navigate]);
 
   // Calculate performance metrics: JavaScript for stats + Gemini for openings
   const calculatePerformanceMetrics = async (analysisData) => {
@@ -247,73 +401,74 @@ const ReportDisplay = () => {
       // ✅ UNIFIED: Use pre-calculated weaknesses from single Gemini call
       setIsCalculatingMetrics(false);
       
-      // Build dynamic recurring weaknesses using Gemini based on user's games
-      try {
+      // Only build dynamic recurring weaknesses if we don't already have them
+      if (!recurringWeaknesses || recurringWeaknesses.length === 0) {
+        try {
           setIsAnalyzingWeaknesses(true);
         const playerInfo = {
-          username,
-          platform: analysisData.platform || analysisData.rawAnalysis?.platform || 'unknown',
-          averageRating: analysisData.averageRating || analysisData.rawAnalysis?.averageRating,
-          skillLevel: analysisData.skillLevel || analysisData.rawAnalysis?.skillLevel
-        };
+            username,
+            platform: analysisData.platform || analysisData.rawAnalysis?.platform || 'unknown',
+            averageRating: analysisData.averageRating || analysisData.rawAnalysis?.averageRating,
+            skillLevel: analysisData.skillLevel || analysisData.rawAnalysis?.skillLevel
+          };
           let rw = [];
-        try {
-          const { generateFullReportSectionsFromGames } = await import('../utils/geminiStockfishAnalysis');
-          const sections = await generateFullReportSectionsFromGames(playerInfo, { totalGames: games.length }, { maxGames: 25 });
-          rw = Array.isArray(sections?.recurringWeaknesses) ? sections.recurringWeaknesses : [];
-        } catch (e) {
-          console.warn('⚠️ Gemini recurring weaknesses generation failed (fallback to existing):', e?.message || e);
-        
-        }
+         try {
+            const { generateFullReportSectionsFromGames } = await import('../utils/geminiStockfishAnalysis');
+            const sections = await generateFullReportSectionsFromGames(playerInfo, { totalGames: games.length }, { maxGames: 25 });
+            rw = Array.isArray(sections?.recurringWeaknesses) ? sections.recurringWeaknesses : [];
+          } catch (e) {
+            console.warn('⚠️ Gemini recurring weaknesses generation failed (fallback to existing):', e?.message || e);
+          }
 
         // Fallback to any precomputed weaknesses on analysisData if Gemini not available
-        const stockfishAnalysis = analysisData.stockfishAnalysis;
-        const deepAnalysisWeaknesses = stockfishAnalysis?.recurringWeaknesses || [];
-        const unifiedWeaknesses = analysisData.recurringWeaknesses || [];
-        // Enrich weaknesses with opponent info so FullReport can always render "vs. Opponent"
-        const gamesArr = games;
-        const safeStr = (v) => (v || '').toString();
-        const getNames = (g) => {
-          const white = g?.white?.username || g?.players?.white?.user?.name || g?.gameInfo?.white || (typeof g?.white === 'string' ? g.white : g?.white?.name);
-          const black = g?.black?.username || g?.players?.black?.user?.name || g?.gameInfo?.black || (typeof g?.black === 'string' ? g.black : g?.black?.name);
-          return { white, black };
-        };
-        const deriveOpponentFromGame = (g, username) => {
-          const { white, black } = getNames(g);
-          const u = safeStr(username).toLowerCase();
-          const w = safeStr(white).toLowerCase();
-          const b = safeStr(black).toLowerCase();
-          if (u && w && u === w) return black || g?.opponent || null;
-          if (u && b && u === b) return white || g?.opponent || null;
-          return g?.opponent || null;
-        };
-        const attachOpponents = (weaknesses) => Array.isArray(weaknesses)
-          ? weaknesses.map(w => {
-              const exs = Array.isArray(w.examples)
-                ? w.examples.map(ex => {
-                    const gn = Number(ex?.gameNumber);
-                    let g = null;
-                    if (Number.isFinite(gn)) {
-                      g = gamesArr.find(gm => Number(gm?.gameNumber) === gn) || gamesArr[gn - 1] || null;
-                    }
-                    const opp = g ? deriveOpponentFromGame(g, username) : null;
-                    return { ...ex, opponent: ex?.opponent || opp || undefined };
-                  })
-                : w.examples;
-              let opponentContext = w.opponentContext;
-              if (!opponentContext && Array.isArray(exs) && exs[0]?.opponent && exs[0]?.moveNumber) {
-                opponentContext = `vs. ${exs[0].opponent} (Move ${exs[0].moveNumber})`;
-              }
-              return { ...w, examples: exs, opponentContext };
-            })
-          : weaknesses;
+          const stockfishAnalysis = analysisData.stockfishAnalysis;
+          const deepAnalysisWeaknesses = stockfishAnalysis?.recurringWeaknesses || [];
+          const unifiedWeaknesses = analysisData.recurringWeaknesses || [];
+          // Enrich weaknesses with opponent info so FullReport can always render "vs. Opponent"
+          const gamesArr = games;
+          const safeStr = (v) => (v || '').toString();
+          const getNames = (g) => {
+            const white = g?.white?.username || g?.players?.white?.user?.name || g?.gameInfo?.white || (typeof g?.white === 'string' ? g.white : g?.white?.name);
+            const black = g?.black?.username || g?.players?.black?.user?.name || g?.gameInfo?.black || (typeof g?.black === 'string' ? g.black : g?.black?.name);
+            return { white, black };
+          };
+          const deriveOpponentFromGame = (g, username) => {
+            const { white, black } = getNames(g);
+            const u = safeStr(username).toLowerCase();
+            const w = safeStr(white).toLowerCase();
+            const b = safeStr(black).toLowerCase();
+            if (u && w && u === w) return black || g?.opponent || null;
+            if (u && b && u === b) return white || g?.opponent || null;
+            return g?.opponent || null;
+          };
+          const attachOpponents = (weaknesses) => Array.isArray(weaknesses)
+            ? weaknesses.map(w => {
+                const exs = Array.isArray(w.examples)
+                  ? w.examples.map(ex => {
+                      const gn = Number(ex?.gameNumber);
+                      let g = null;
+                      if (Number.isFinite(gn)) {
+                        g = gamesArr.find(gm => Number(gm?.gameNumber) === gn) || gamesArr[gn - 1] || null;
+                      }
+                      const opp = g ? deriveOpponentFromGame(g, username) : null;
+                      return { ...ex, opponent: ex?.opponent || opp || undefined };
+                    })
+                  : w.examples;
+                let opponentContext = w.opponentContext;
+                if (!opponentContext && Array.isArray(exs) && exs[0]?.opponent && exs[0]?.moveNumber) {
+                  opponentContext = `vs. ${exs[0].opponent} (Move ${exs[0].moveNumber})`;
+                }
+                return { ...w, examples: exs, opponentContext };
+              })
+            : weaknesses;
 
-        const baseWeaknesses = rw.length > 0 ? rw : (deepAnalysisWeaknesses.length > 0 ? deepAnalysisWeaknesses : unifiedWeaknesses);
-        const enrichedWeaknesses = attachOpponents(baseWeaknesses);
-        setRecurringWeaknesses(enrichedWeaknesses);
-        REPORT_DISPLAY_CACHE = { ...REPORT_DISPLAY_CACHE, recurringWeaknesses: enrichedWeaknesses };
-      } finally {
-        setIsAnalyzingWeaknesses(false);
+          const baseWeaknesses = rw.length > 0 ? rw : (deepAnalysisWeaknesses.length > 0 ? deepAnalysisWeaknesses : unifiedWeaknesses);
+          const enrichedWeaknesses = attachOpponents(baseWeaknesses);
+          setRecurringWeaknesses(enrichedWeaknesses);
+          REPORT_DISPLAY_CACHE = { ...REPORT_DISPLAY_CACHE, recurringWeaknesses: enrichedWeaknesses };
+        } finally {
+          setIsAnalyzingWeaknesses(false);
+        }
       }
       
       // No need to set analyzing state since data is already available
@@ -3422,48 +3577,273 @@ Guidelines:
           <div className="dashboard-panel">
             <h3>Start Your Training</h3>
             <div className="training-options">
+              {/* Tactical Puzzles (Fix Weaknesses) */}
               <div 
                 className="training-option active clickable"
                 onClick={() => navigate('/puzzle/fix-weaknesses', { state: { analysis } })}
               >
-                <h4>Fix My Weaknesses</h4>
-                <p>Puzzles for recurring issues</p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <h4>Fix My Weaknesses</h4>
+                    <p>Puzzles for recurring issues</p>
+                    {(() => {
+                      const accessInfo = getPuzzleAccessInfo('tactical');
+                      if (accessInfo.total > 0) {
+                        return (
+                          <div style={{ fontSize: '0.85rem', marginTop: '0.5rem', color: 'var(--text-light-color)' }}>
+                            {accessInfo.hasAccess ? (
+                              <span style={{ color: 'var(--success-color)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <Unlock size={14} /> {accessInfo.total} puzzles unlocked
+                              </span>
+                            ) : (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <span style={{ color: 'var(--success-color)' }}>{accessInfo.free} free</span>
+                                <span>, </span>
+                                <Lock size={12} style={{ color: 'var(--warning-color)' }} />
+                                <span style={{ color: 'var(--warning-color)' }}>{accessInfo.locked} locked</span>
+                              </span>
+                            )}
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
+                  {(() => {
+                    const accessInfo = getPuzzleAccessInfo('tactical');
+                    if (accessInfo.free > 0 && !accessInfo.hasAccess) {
+                      return (
+                        <span style={{ 
+                          fontSize: '0.75rem', 
+                          padding: '0.25rem 0.5rem', 
+                          backgroundColor: 'var(--success-color)', 
+                          color: 'white', 
+                          borderRadius: '4px',
+                          fontWeight: '600'
+                        }}>
+                          FREE TEASER
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
               </div>
+
+              {/* Positional Puzzles (Learn From Mistakes) */}
               <div 
                 className="training-option clickable"
                 onClick={() => navigate('/puzzle/learn-mistakes', { state: { analysis } })}
               >
-                <h4>Learn From My Mistakes</h4>
-                <p>Puzzles you missed in-game</p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <h4>Learn From My Mistakes</h4>
+                    <p>Puzzles you missed in-game</p>
+                    {(() => {
+                      const accessInfo = getPuzzleAccessInfo('positional');
+                      if (accessInfo.total > 0) {
+                        return (
+                          <div style={{ fontSize: '0.85rem', marginTop: '0.5rem', color: 'var(--text-light-color)' }}>
+                            {accessInfo.hasAccess ? (
+                              <span style={{ color: 'var(--success-color)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <Unlock size={14} /> {accessInfo.total} puzzles unlocked
+                              </span>
+                            ) : (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <span style={{ color: 'var(--success-color)' }}>{accessInfo.free} free</span>
+                                <span>, </span>
+                                <Lock size={12} style={{ color: 'var(--warning-color)' }} />
+                                <span style={{ color: 'var(--warning-color)' }}>{accessInfo.locked} locked</span>
+                              </span>
+                            )}
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
+                  {(() => {
+                    const accessInfo = getPuzzleAccessInfo('positional');
+                    if (accessInfo.free > 0 && !accessInfo.hasAccess) {
+                      return (
+                        <span style={{ 
+                          fontSize: '0.75rem', 
+                          padding: '0.25rem 0.5rem', 
+                          backgroundColor: 'var(--success-color)', 
+                          color: 'white', 
+                          borderRadius: '4px',
+                          fontWeight: '600'
+                        }}>
+                          FREE TEASER
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
               </div>
+
+              {/* Opening Puzzles */}
               <div 
                 className="training-option clickable"
-                
-                
                 onClick={() => navigate('/puzzle/master-openings', { 
-  state: { 
-    analysis, 
-    performanceMetrics,
-    // flatten for compatibility with PuzzlePage fallbacks
-    openingFrequencies: performanceMetrics?.openingFrequencies,
-    topOpeningFamilies: performanceMetrics?.topOpeningFamilies
-  } 
-})}
-
-
+                  state: { 
+                    analysis, 
+                    performanceMetrics,
+                    openingFrequencies: performanceMetrics?.openingFrequencies,
+                    topOpeningFamilies: performanceMetrics?.topOpeningFamilies
+                  }
+                })}
               >
-                <h4>Master My Openings</h4>
-                <p>Puzzles from your openings</p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <h4>Master My Openings</h4>
+                    <p>Puzzles from your openings</p>
+                    {(() => {
+                      const accessInfo = getPuzzleAccessInfo('opening');
+                      if (accessInfo.total > 0) {
+                        return (
+                          <div style={{ fontSize: '0.85rem', marginTop: '0.5rem', color: 'var(--text-light-color)' }}>
+                            {accessInfo.hasAccess ? (
+                              <span style={{ color: 'var(--success-color)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <Unlock size={14} /> {accessInfo.total} puzzles unlocked
+                              </span>
+                            ) : (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <span style={{ color: 'var(--success-color)' }}>{accessInfo.free} free</span>
+                                <span>, </span>
+                                <Lock size={12} style={{ color: 'var(--warning-color)' }} />
+                                <span style={{ color: 'var(--warning-color)' }}>{accessInfo.locked} locked</span>
+                              </span>
+                            )}
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
+                  {(() => {
+                    const accessInfo = getPuzzleAccessInfo('opening');
+                    if (accessInfo.free > 0 && !accessInfo.hasAccess) {
+                      return (
+                        <span style={{ 
+                          fontSize: '0.75rem', 
+                          padding: '0.25rem 0.5rem', 
+                          backgroundColor: 'var(--success-color)', 
+                          color: 'white', 
+                          borderRadius: '4px',
+                          fontWeight: '600'
+                        }}>
+                          FREE TEASER
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
               </div>
+
+              {/* Endgame Puzzles */}
               <div 
                 className="training-option clickable"
                 onClick={() => navigate('/puzzle/sharpen-endgame', { state: { analysis } })}
-                
               >
-                <h4>Sharpen My Endgame</h4>
-                <p>General endgame puzzles</p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <h4>Sharpen My Endgame</h4>
+                    <p>General endgame puzzles</p>
+                    {(() => {
+                      const accessInfo = getPuzzleAccessInfo('endgame');
+                      if (accessInfo.total > 0) {
+                        return (
+                          <div style={{ fontSize: '0.85rem', marginTop: '0.5rem', color: 'var(--text-light-color)' }}>
+                            {accessInfo.hasAccess ? (
+                              <span style={{ color: 'var(--success-color)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <Unlock size={14} /> {accessInfo.total} puzzles unlocked
+                              </span>
+                            ) : (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <span style={{ color: 'var(--success-color)' }}>{accessInfo.free} free</span>
+                                <span>, </span>
+                                <Lock size={12} style={{ color: 'var(--warning-color)' }} />
+                                <span style={{ color: 'var(--warning-color)' }}>{accessInfo.locked} locked</span>
+                              </span>
+                            )}
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
+                  {(() => {
+                    const accessInfo = getPuzzleAccessInfo('endgame');
+                    if (accessInfo.free > 0 && !accessInfo.hasAccess) {
+                      return (
+                        <span style={{ 
+                          fontSize: '0.75rem', 
+                          padding: '0.25rem 0.5rem', 
+                          backgroundColor: 'var(--success-color)', 
+                          color: 'white', 
+                          borderRadius: '4px',
+                          fontWeight: '600'
+                        }}>
+                          FREE TEASER
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
               </div>
             </div>
+
+            {/* Unlock All Puzzles CTA */}
+            {puzzleAccessData && !puzzleAccessData.hasSubscription && !puzzleAccessData.hasOneTimeUnlock && puzzleAccessData.locked > 0 && (
+              <div style={{ 
+                marginTop: '1.5rem', 
+                padding: '1.25rem', 
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                borderRadius: '12px',
+                color: 'white',
+                textAlign: 'center'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                  <Lock size={20} />
+                  <h4 style={{ margin: 0, fontSize: '1.1rem' }}>Unlock All {puzzleAccessData.locked} Puzzles</h4>
+                </div>
+                <p style={{ margin: '0 0 1rem 0', fontSize: '0.9rem', opacity: 0.9 }}>
+                  Get lifetime access to all puzzles in this report for just $4.99
+                </p>
+                <button
+                  onClick={handleUnlockAllPuzzles}
+                  style={{
+                    padding: '0.75rem 2rem',
+                    backgroundColor: 'white',
+                    color: '#667eea',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '1rem',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    transition: 'transform 0.2s, box-shadow 0.2s',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.transform = 'translateY(-2px)';
+                    e.target.style.boxShadow = '0 6px 16px rgba(0,0,0,0.2)';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.transform = 'translateY(0)';
+                    e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+                  }}
+                >
+                  Unlock Now - $4.99
+                </button>
+                <p style={{ margin: '0.75rem 0 0 0', fontSize: '0.75rem', opacity: 0.8 }}>
+                  One-time payment • Instant access • No subscription required
+                </p>
+              </div>
+            )}
           </div>
         </div>
 

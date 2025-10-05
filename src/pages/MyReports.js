@@ -22,16 +22,26 @@ import {
   Loader2,
   AlertCircle,
   CheckCircle,
-  TrendingUp
+  TrendingUp,
+  Crown,
+  Lock
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useUserProfile } from '../hooks/useUserProfile';
 import toast from 'react-hot-toast';
 import reportService from '../services/reportService';
 
 const MyReports = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { 
+    profile, 
+    loading: profileLoading,
+    hasActiveSubscription,
+    hasClaimedFreeReport,
+    getSubscriptionTier
+  } = useUserProfile();
   
   // State management
   const [reports, setReports] = useState([]);
@@ -95,9 +105,18 @@ const MyReports = () => {
   });
 
   // Handle report actions
-  const handleViewReport = async (reportId) => {
+  const handleViewReport = async (report) => {
     try {
-      const reportData = await reportService.getReportById(reportId, user.id);
+      // If PDF URL exists, open it in a new tab
+      if (report.pdf_url) {
+        console.log('📄 Opening PDF report:', report.pdf_url);
+        window.open(report.pdf_url, '_blank', 'noopener,noreferrer');
+        return;
+      }
+      
+      // Fallback: Load full report data and navigate to /full-report (for legacy reports)
+      console.log('📊 Loading legacy report data for:', report.id);
+      const reportData = await reportService.getReportById(report.id, user.id);
       
       // Navigate to FullReport with the saved analysis data
       navigate('/full-report', {
@@ -109,7 +128,7 @@ const MyReports = () => {
           improvementRecommendations: reportData.analysis_data.improvementRecommendations,
           personalizedResources: reportData.analysis_data.personalizedResources,
           dataSource: 'saved_report',
-          reportId: reportId
+          reportId: report.id
         }
       });
     } catch (error) {
@@ -196,9 +215,80 @@ const MyReports = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 pt-24 pb-8">
       <div className="container mx-auto px-4 max-w-7xl">
         
+        {/* ✅ PHASE 2: Subscription Status Banner */}
+        {user && !profileLoading && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6"
+          >
+            {!hasActiveSubscription() ? (
+              // Free tier user
+              hasClaimedFreeReport() ? (
+                // Free report already used - show upgrade prompt
+                <div className="bg-gradient-to-r from-orange-50 to-amber-50 border-2 border-orange-200 rounded-xl p-4 shadow-md">
+                  <div className="flex items-center justify-between flex-wrap gap-3">
+                    <div className="flex items-center gap-3">
+                      <Lock className="w-6 h-6 text-orange-600" />
+                      <div>
+                        <p className="font-semibold text-gray-800">Free Report Used</p>
+                        <p className="text-sm text-gray-600">Subscribe to generate unlimited reports and access personalized puzzles</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => navigate('/pricing')}
+                      className="px-6 py-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-semibold rounded-lg hover:from-orange-600 hover:to-amber-600 transition-all shadow-md hover:shadow-lg"
+                    >
+                      View Plans
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                // Free report still available
+                <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-xl p-4 shadow-md">
+                  <div className="flex items-center justify-between flex-wrap gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                        1
+                      </div>
+                      <div>
+                        <p className="font-semibold text-gray-800">Free Report Available</p>
+                        <p className="text-sm text-gray-600">You have 1 free report remaining. Subscribe for unlimited access!</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => navigate('/reports')}
+                      className="px-6 py-2 bg-gradient-to-r from-green-500 to-emerald-500 text-white font-semibold rounded-lg hover:from-green-600 hover:to-emerald-600 transition-all shadow-md hover:shadow-lg"
+                    >
+                      Generate Report
+                    </button>
+                  </div>
+                </div>
+              )
+            ) : (
+              // Subscribed user
+              <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border-2 border-purple-200 rounded-xl p-4 shadow-md">
+                <div className="flex items-center gap-3">
+                  <Crown className="w-6 h-6 text-purple-600" />
+                  <div>
+                    <p className="font-semibold text-gray-800">
+                      {getSubscriptionTier().charAt(0).toUpperCase() + getSubscriptionTier().slice(1)} Plan Active
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      {profile?.subscription_expires_at 
+                        ? `Expires: ${new Date(profile.subscription_expires_at).toLocaleDateString()}`
+                        : 'Unlimited reports and personalized puzzles'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </motion.div>
+        )}
+
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
@@ -428,11 +518,11 @@ const MyReports = () => {
                       {/* Actions */}
                       <div className="flex items-center gap-2 ml-4">
                         <button
-                          onClick={() => handleViewReport(report.id)}
+                          onClick={() => handleViewReport(report)}
                           className="flex items-center gap-1 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                         >
                           <Eye size={16} />
-                          View
+                          {report.pdf_url ? 'View PDF' : 'View'}
                         </button>
                         <button
                           onClick={() => handleDeleteReport(report.id, report.title)}

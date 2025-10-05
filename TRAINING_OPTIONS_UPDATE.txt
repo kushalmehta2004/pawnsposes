@@ -1,0 +1,271 @@
+          <div className="dashboard-panel">
+            <h3>Start Your Training</h3>
+            <div className="training-options">
+              {/* Tactical Puzzles (Fix Weaknesses) */}
+              <div 
+                className="training-option active clickable"
+                onClick={() => navigate('/puzzle/fix-weaknesses', { state: { analysis } })}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <h4>Fix My Weaknesses</h4>
+                    <p>Puzzles for recurring issues</p>
+                    {(() => {
+                      const accessInfo = getPuzzleAccessInfo('tactical');
+                      if (accessInfo.total > 0) {
+                        return (
+                          <div style={{ fontSize: '0.85rem', marginTop: '0.5rem', color: 'var(--text-light-color)' }}>
+                            {accessInfo.hasAccess ? (
+                              <span style={{ color: 'var(--success-color)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <Unlock size={14} /> {accessInfo.total} puzzles unlocked
+                              </span>
+                            ) : (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <span style={{ color: 'var(--success-color)' }}>{accessInfo.free} free</span>
+                                <span>, </span>
+                                <Lock size={12} style={{ color: 'var(--warning-color)' }} />
+                                <span style={{ color: 'var(--warning-color)' }}>{accessInfo.locked} locked</span>
+                              </span>
+                            )}
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
+                  {(() => {
+                    const accessInfo = getPuzzleAccessInfo('tactical');
+                    if (accessInfo.free > 0 && !accessInfo.hasAccess) {
+                      return (
+                        <span style={{ 
+                          fontSize: '0.75rem', 
+                          padding: '0.25rem 0.5rem', 
+                          backgroundColor: 'var(--success-color)', 
+                          color: 'white', 
+                          borderRadius: '4px',
+                          fontWeight: '600'
+                        }}>
+                          FREE TEASER
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+              </div>
+
+              {/* Positional Puzzles (Learn From Mistakes) */}
+              <div 
+                className="training-option clickable"
+                onClick={() => navigate('/puzzle/learn-mistakes', { state: { analysis } })}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <h4>Learn From My Mistakes</h4>
+                    <p>Puzzles you missed in-game</p>
+                    {(() => {
+                      const accessInfo = getPuzzleAccessInfo('positional');
+                      if (accessInfo.total > 0) {
+                        return (
+                          <div style={{ fontSize: '0.85rem', marginTop: '0.5rem', color: 'var(--text-light-color)' }}>
+                            {accessInfo.hasAccess ? (
+                              <span style={{ color: 'var(--success-color)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <Unlock size={14} /> {accessInfo.total} puzzles unlocked
+                              </span>
+                            ) : (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <span style={{ color: 'var(--success-color)' }}>{accessInfo.free} free</span>
+                                <span>, </span>
+                                <Lock size={12} style={{ color: 'var(--warning-color)' }} />
+                                <span style={{ color: 'var(--warning-color)' }}>{accessInfo.locked} locked</span>
+                              </span>
+                            )}
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
+                  {(() => {
+                    const accessInfo = getPuzzleAccessInfo('positional');
+                    if (accessInfo.free > 0 && !accessInfo.hasAccess) {
+                      return (
+                        <span style={{ 
+                          fontSize: '0.75rem', 
+                          padding: '0.25rem 0.5rem', 
+                          backgroundColor: 'var(--success-color)', 
+                          color: 'white', 
+                          borderRadius: '4px',
+                          fontWeight: '600'
+                        }}>
+                          FREE TEASER
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+              </div>
+
+              {/* Opening Puzzles */}
+              <div 
+                className="training-option clickable"
+                onClick={() => navigate('/puzzle/master-openings', { 
+                  state: { 
+                    analysis, 
+                    performanceMetrics,
+                    openingFrequencies: performanceMetrics?.openingFrequencies,
+                    topOpeningFamilies: performanceMetrics?.topOpeningFamilies
+                  }
+                })}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <h4>Master My Openings</h4>
+                    <p>Puzzles from your openings</p>
+                    {(() => {
+                      const accessInfo = getPuzzleAccessInfo('opening');
+                      if (accessInfo.total > 0) {
+                        return (
+                          <div style={{ fontSize: '0.85rem', marginTop: '0.5rem', color: 'var(--text-light-color)' }}>
+                            {accessInfo.hasAccess ? (
+                              <span style={{ color: 'var(--success-color)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <Unlock size={14} /> {accessInfo.total} puzzles unlocked
+                              </span>
+                            ) : (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <span style={{ color: 'var(--success-color)' }}>{accessInfo.free} free</span>
+                                <span>, </span>
+                                <Lock size={12} style={{ color: 'var(--warning-color)' }} />
+                                <span style={{ color: 'var(--warning-color)' }}>{accessInfo.locked} locked</span>
+                              </span>
+                            )}
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
+                  {(() => {
+                    const accessInfo = getPuzzleAccessInfo('opening');
+                    if (accessInfo.free > 0 && !accessInfo.hasAccess) {
+                      return (
+                        <span style={{ 
+                          fontSize: '0.75rem', 
+                          padding: '0.25rem 0.5rem', 
+                          backgroundColor: 'var(--success-color)', 
+                          color: 'white', 
+                          borderRadius: '4px',
+                          fontWeight: '600'
+                        }}>
+                          FREE TEASER
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+              </div>
+
+              {/* Endgame Puzzles */}
+              <div 
+                className="training-option clickable"
+                onClick={() => navigate('/puzzle/sharpen-endgame', { state: { analysis } })}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <h4>Sharpen My Endgame</h4>
+                    <p>General endgame puzzles</p>
+                    {(() => {
+                      const accessInfo = getPuzzleAccessInfo('endgame');
+                      if (accessInfo.total > 0) {
+                        return (
+                          <div style={{ fontSize: '0.85rem', marginTop: '0.5rem', color: 'var(--text-light-color)' }}>
+                            {accessInfo.hasAccess ? (
+                              <span style={{ color: 'var(--success-color)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <Unlock size={14} /> {accessInfo.total} puzzles unlocked
+                              </span>
+                            ) : (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <span style={{ color: 'var(--success-color)' }}>{accessInfo.free} free</span>
+                                <span>, </span>
+                                <Lock size={12} style={{ color: 'var(--warning-color)' }} />
+                                <span style={{ color: 'var(--warning-color)' }}>{accessInfo.locked} locked</span>
+                              </span>
+                            )}
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
+                  {(() => {
+                    const accessInfo = getPuzzleAccessInfo('endgame');
+                    if (accessInfo.free > 0 && !accessInfo.hasAccess) {
+                      return (
+                        <span style={{ 
+                          fontSize: '0.75rem', 
+                          padding: '0.25rem 0.5rem', 
+                          backgroundColor: 'var(--success-color)', 
+                          color: 'white', 
+                          borderRadius: '4px',
+                          fontWeight: '600'
+                        }}>
+                          FREE TEASER
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+              </div>
+            </div>
+
+            {/* Unlock All Puzzles CTA */}
+            {puzzleAccessData && !puzzleAccessData.hasSubscription && !puzzleAccessData.hasOneTimeUnlock && puzzleAccessData.locked > 0 && (
+              <div style={{ 
+                marginTop: '1.5rem', 
+                padding: '1.25rem', 
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                borderRadius: '12px',
+                color: 'white',
+                textAlign: 'center'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                  <Lock size={20} />
+                  <h4 style={{ margin: 0, fontSize: '1.1rem' }}>Unlock All {puzzleAccessData.locked} Puzzles</h4>
+                </div>
+                <p style={{ margin: '0 0 1rem 0', fontSize: '0.9rem', opacity: 0.9 }}>
+                  Get lifetime access to all puzzles in this report for just $4.99
+                </p>
+                <button
+                  onClick={handleUnlockAllPuzzles}
+                  style={{
+                    padding: '0.75rem 2rem',
+                    backgroundColor: 'white',
+                    color: '#667eea',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '1rem',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    transition: 'transform 0.2s, box-shadow 0.2s',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.transform = 'translateY(-2px)';
+                    e.target.style.boxShadow = '0 6px 16px rgba(0,0,0,0.2)';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.transform = 'translateY(0)';
+                    e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+                  }}
+                >
+                  Unlock Now - $4.99
+                </button>
+                <p style={{ margin: '0.75rem 0 0 0', fontSize: '0.75rem', opacity: 0.8 }}>
+                  One-time payment • Instant access • No subscription required
+                </p>
+              </div>
+            )}
+          </div>
