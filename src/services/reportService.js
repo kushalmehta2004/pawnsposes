@@ -4,36 +4,66 @@
  */
 
 import { supabase } from './supabaseClient';
+import { compress, decompress } from 'lz-string';
 
 class ReportService {
   /**
-   * Save a report to Supabase
+   * Helper: Encode string to base64
+   * @private
+   */
+  _encodeBase64(str) {
+    const uint8Array = new TextEncoder().encode(str);
+    let binary = '';
+    uint8Array.forEach(byte => binary += String.fromCharCode(byte));
+    return btoa(binary);
+  }
+
+  /**
+   * Helper: Decode base64 to string
+   * @private
+   */
+  _decodeBase64(base64) {
+    const binary = atob(base64);
+    const uint8Array = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      uint8Array[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder().decode(uint8Array);
+  }
+
+  /**
+   * Save a PDF report to Supabase
    * @param {string} userId - User ID
-   * @param {Object} reportData - Report data from analysis
+   * @param {string} pdfUrl - URL of the uploaded PDF
+   * @param {string} platform - Platform
+   * @param {string} username - Username
+   * @param {string} title - Report title
+   * @param {number} gameCount - Number of games analyzed
    * @returns {Promise<Object>} - Created report record with ID
    */
-  async saveReport(userId, reportData) {
+  async saveReport(userId, pdfUrl, platform, username, title, gameCount) {
     try {
       const { data, error } = await supabase
         .from('reports')
         .insert({
           user_id: userId,
-          username: reportData.username || reportData.formData?.username,
-          platform: reportData.platform || reportData.formData?.platform,
-          title: this._generateReportTitle(reportData),
-          game_count: reportData.games?.length || reportData.gameData?.length || 0,
-          analysis_data: reportData.rawAnalysis || reportData,
-          summary_metrics: this._extractSummaryMetrics(reportData),
+          username: username,
+          platform: platform,
+          title: title,
+          game_count: gameCount,
+          analysis_data: null, // No JSON data for PDF reports
+          pdf_url: pdfUrl,
+          summary_metrics: null, // No metrics for PDF reports
         })
         .select()
         .single();
 
       if (error) throw error;
 
-      console.log('✅ Report saved to Supabase:', data.id);
+      console.log('✅ PDF Report saved to Supabase:', data.id);
       return data;
     } catch (error) {
-      console.error('❌ Failed to save report:', error);
+      console.error('❌ Failed to save PDF report:', error);
       throw error;
     }
   }
@@ -41,19 +71,43 @@ class ReportService {
   /**
    * Get all reports for a user
    * @param {string} userId - User ID
+   * @param {Object} options - Query options (limit, offset, sortBy, sortOrder)
    * @returns {Promise<Array>} - Array of report records
    */
-  async getUserReports(userId) {
+  async getUserReports(userId, options = {}) {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('reports')
         .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
+        .eq('user_id', userId);
+
+      if (options.sortBy && options.sortOrder) {
+        query = query.order(options.sortBy, { ascending: options.sortOrder === 'asc' });
+      } else {
+        query = query.order('created_at', { ascending: false });
+      }
+
+      if (options.limit) {
+        query = query.limit(options.limit);
+      }
+      if (options.offset) {
+        query = query.range(options.offset, options.offset + options.limit - 1);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
 
-      return data || [];
+      // Decompress analysis_data if compressed (for legacy JSON reports)
+      const reports = data.map(report => {
+        if (report.analysis_data && typeof report.analysis_data === 'object' && report.analysis_data.compressed) {
+          const decompressed = decompress(this._decodeBase64(report.analysis_data.data));
+          report.analysis_data = JSON.parse(decompressed);
+        }
+        return report;
+      });
+
+      return reports;
     } catch (error) {
       console.error('❌ Failed to get user reports:', error);
       throw error;
@@ -74,6 +128,12 @@ class ReportService {
         .single();
 
       if (error) throw error;
+
+      // Decompress analysis_data if compressed
+      if (data.analysis_data && data.analysis_data.compressed) {
+        const decompressed = decompress(this._decodeBase64(data.analysis_data.data));
+        data.analysis_data = JSON.parse(decompressed);
+      }
 
       return data;
     } catch (error) {

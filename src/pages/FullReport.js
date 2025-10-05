@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import reportService from '../services/reportService';
+import pdfService from '../services/pdfService';
 
 import toast from 'react-hot-toast';
 
@@ -38,6 +39,9 @@ const FullReport = () => {
   // State for async content loading
   const [positionalStudy, setPositionalStudy] = React.useState(null);
   const [isLoadingStudy, setIsLoadingStudy] = React.useState(false);
+
+  // Ref to prevent duplicate auto-saves
+  const hasSavedRef = React.useRef(false);
   const [phaseReview, setPhaseReview] = React.useState(null);
   const [actionPlan, setActionPlan] = React.useState(null);
   const [isLoadingActionPlan, setIsLoadingActionPlan] = React.useState(false);
@@ -199,11 +203,11 @@ const FullReport = () => {
     return hasVideoContent && hasPositionalStudy && hasPhaseReview && hasActionPlan;
   }, [recurringWeaknesses, videoRec, positionalStudy, isLoadingStudy, phaseReview, isLoadingPhaseReview, actionPlan, isLoadingActionPlan, analysis, isLoadingVideo]);
 
-  // Auto-save report when analysis is complete AND all content has loaded (only for new reports, not saved ones)
+  // Auto-save PDF report when analysis is complete AND all content has loaded (only for new reports, not saved ones)
   React.useEffect(() => {
-    const saveReportAutomatically = async () => {
+    const savePDFReportAutomatically = async () => {
       // Debug logging for auto-save conditions
-      console.log('🔍 Auto-save check:', {
+      console.log('🔍 PDF Auto-save check:', {
         user: !!user,
         userId: user?.id,
         analysis: !!analysis,
@@ -239,63 +243,61 @@ const FullReport = () => {
       // 5. Data source indicates this is from a fresh analysis
       // 6. ALL content has finished loading (including async components)
       if (
-        user && 
-        analysis && 
-        performanceMetrics && 
-        recurringWeaknesses && 
-        !reportId && 
+        user &&
+        analysis &&
+        performanceMetrics &&
+        recurringWeaknesses &&
+        !reportId &&
         analysisId &&
         !SAVED_ANALYSIS_IDS.has(analysisId) &&
-        dataSource && 
+        dataSource &&
         !dataSource.includes('saved_report') &&
         isAllContentLoaded
       ) {
         try {
-          console.log('🔄 Auto-saving complete chess analysis report (all content loaded)...');
-          console.log('📊 Report data preview:', {
-            analysisGames: analysis?.games?.length || analysis?.gameData?.length,
-            username: analysis?.username || analysis?.formData?.username,
-            platform: analysis?.formData?.platform || analysis?.platform,
-            performanceMetricsKeys: Object.keys(performanceMetrics || {}),
-            recurringWeaknessesCount: recurringWeaknesses?.length,
-            hasVideoRec: !!videoRec?.url,
-            hasPositionalStudy: !!positionalStudy,
-            hasPhaseReview: !!phaseReview,
-            hasActionPlan: !!actionPlan
-          });
-          
-          const reportData = {
-            analysis,
-            performanceMetrics,
-            recurringWeaknesses,
-            engineInsights,
-            improvementRecommendations,
-            personalizedResources,
-            // Include the additional content that loads asynchronously
-            videoRecommendation: videoRec,
-            positionalStudy,
-            phaseReview,
-            actionPlan
-          };
+          if (hasSavedRef.current) {
+            console.log('⏭️ PDF Auto-save skipped - already saved for this analysis');
+            return;
+          }
 
-          const savedReport = await reportService.saveReport(reportData, user.id);
+          console.log('🔄 Auto-saving PDF report (all content loaded)...');
+
+          const username = analysis?.username || analysis?.formData?.username || 'Unknown';
+          const platform = analysis?.platform || analysis?.formData?.platform || 'Unknown';
+          const gameCount = analysis?.games?.length || analysis?.gameData?.length || 0;
+          const title = `${username}'s Chess Analysis Report - ${gameCount} games`;
+
+          // Generate PDF from current page
+          const pdfBlob = await pdfService.generatePDFFromCurrentPage(title);
+
+          // Upload PDF to storage
+          const pdfUrl = await pdfService.uploadPDFToStorage(pdfBlob, title, user.id);
+
+          // Save report record with PDF URL
+          const savedReport = await reportService.saveReport(user.id, pdfUrl, platform, username, title, gameCount);
           setReportSaved(true);
           setSavedReportId(savedReport.id);
           SAVED_ANALYSIS_IDS.add(analysisId);
-          
-          console.log('✅ Report auto-saved successfully with all content:', savedReport.id);
+          hasSavedRef.current = true;
+
+          console.log('✅ PDF Report auto-saved successfully:', savedReport.id);
+
+          toast.success('Report saved as PDF successfully!', {
+            duration: 3000,
+            icon: '💾'
+          });
 
         } catch (error) {
-          console.error('❌ Failed to auto-save report:', error);
+          console.error('❌ Failed to auto-save PDF report:', error);
           console.error('❌ Error details:', error.message);
-          
+
           // Show user-friendly error messages
-          let errorMessage = 'Failed to save report';
-          
+          let errorMessage = 'Failed to save PDF report';
+
           if (error.message?.includes('timeout')) {
-            errorMessage = 'Report is too large to save. Try analyzing fewer games.';
-          } else if (error.message?.includes('too large')) {
-            errorMessage = 'Report data is too large. Please try with fewer games.';
+            errorMessage = 'PDF generation timed out. Try again.';
+          } else if (error.message?.includes('storage')) {
+            errorMessage = 'Failed to upload PDF. Check your connection.';
           } else if (error.message?.includes('403')) {
             errorMessage = 'Permission denied. Please check your login status.';
           } else if (error.message?.includes('500')) {
@@ -303,20 +305,20 @@ const FullReport = () => {
           } else {
             errorMessage = `Save failed: ${error.message}`;
           }
-          
+
           toast.error(errorMessage, {
             duration: 7000,
             icon: '❌'
           });
         }
       } else {
-        console.log('⏭️ Auto-save skipped - conditions not met or content still loading');
+        console.log('⏭️ PDF Auto-save skipped - conditions not met or content still loading');
       }
     };
 
     // Only attempt to save if all content is loaded, with a minimum delay
     if (isAllContentLoaded) {
-      const timeoutId = setTimeout(saveReportAutomatically, 1000);
+      const timeoutId = setTimeout(savePDFReportAutomatically, 1000);
       return () => clearTimeout(timeoutId);
     }
   }, [user, analysis, performanceMetrics, recurringWeaknesses, engineInsights, improvementRecommendations, personalizedResources, reportId, analysisId, dataSource, isAllContentLoaded, videoRec, positionalStudy, phaseReview, actionPlan]);
@@ -342,57 +344,7 @@ const FullReport = () => {
       } 
     });
   };
-  const handleManualSave = async () => {
-    if (reportSaved) {
-      toast.info('Report already saved!', { icon: '✅' });
-      return;
-    }
 
-    try {
-      const reportData = {
-        analysis,
-        performanceMetrics,
-        recurringWeaknesses,
-        engineInsights,
-        improvementRecommendations,
-        personalizedResources
-      };
-
-      toast.loading('Generating PDF...', { id: 'manual-save' });
-
-      const savedReport = await reportService.saveReport(reportData, user.id);
-      setReportSaved(true);
-
-      toast.success('Report saved as PDF successfully!', {
-        id: 'manual-save',
-        icon: '💾',
-        duration: 3000
-      });
-
-      console.log('✅ Manual save successful:', savedReport.id);
-    } catch (error) {
-      console.error('❌ Manual save failed:', error);
-
-      let errorMessage = 'Failed to save report';
-      if (error.message?.includes('bucket') || error.message?.includes('storage')) {
-        errorMessage = 'PDF storage not set up yet. Please contact support to enable PDF reports.';
-      } else if (error.message?.includes('PDF')) {
-        errorMessage = 'Failed to generate PDF. Please try again.';
-      } else if (error.message?.includes('403')) {
-        errorMessage = 'Permission denied. Please check your login status.';
-      } else if (error.message?.includes('500')) {
-        errorMessage = 'Server error. Please try again later.';
-      } else {
-        errorMessage = error.message || 'Unknown error occurred';
-      }
-
-      toast.error(errorMessage, {
-        id: 'manual-save',
-        duration: 7000,
-        icon: '❌'
-      });
-    }
-  };
 
   const handleDownloadPDF = () => {
     // Force light mode and hide interactive buttons in the printed PDF
@@ -441,6 +393,8 @@ const FullReport = () => {
       }
     }, 1500);
   };
+
+
 
   if (!analysis) {
     navigate('/report-display');
