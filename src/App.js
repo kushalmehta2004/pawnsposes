@@ -16,6 +16,7 @@ import ReportDisplay from './pages/ReportDisplay';
 import FullReport from './pages/FullReport';
 import MyReports from './pages/MyReports';
 import PuzzlePage from './pages/PuzzlePage';
+import Pricing from './pages/Pricing';
 import PuzzleDataTest from './components/PuzzleDataTest';
 import MistakeAnalysisTest from './components/MistakeAnalysisTest';
 import Phase2Summary from './components/Phase2Summary';
@@ -76,6 +77,7 @@ function App() {
               <Route path="/puzzle-test" element={<PuzzleDataTest />} />
               <Route path="/mistake-analysis-test" element={<MistakeAnalysisTest />} />
               <Route path="/phase2-summary" element={<Phase2Summary />} />
+              <Route path="/pricing" element={<Pricing />} />
               <Route path="/profile-test" element={<ProfileTest />} />
               <Route path="/contact" element={<Contact />} />
             </Routes>

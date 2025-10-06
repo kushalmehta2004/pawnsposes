@@ -8,6 +8,8 @@ import { initializePuzzleDatabase, getPuzzleDatabase } from '../utils/puzzleData
 import puzzleDataService from '../services/puzzleDataService';
 import puzzleAccessService from '../services/puzzleAccessService';
 import { useAuth } from '../contexts/AuthContext';
+import UpgradePrompt from '../components/UpgradePrompt';
+import userProfileService from '../services/userProfileService';
 // Simple in-memory cache to persist report sections across route toggles (resets on reload)
 let REPORT_DISPLAY_CACHE = {
   key: null,
@@ -39,6 +41,7 @@ const ReportDisplay = () => {
     hasOneTimeUnlock: false
   });
   const [isLoadingAccessData, setIsLoadingAccessData] = useState(false);
+  const [canAccessPuzzles, setCanAccessPuzzles] = useState(true);
 
   // Background pre-generation of puzzles for Fix My Weaknesses and Learn From My Mistakes
   const prewarmUserPuzzles = async (analysisData) => {
@@ -119,9 +122,9 @@ const ReportDisplay = () => {
             
             // Store puzzles with access control (1 teaser per category)
             await puzzleAccessService.storePuzzlesBatch(
+              allPuzzles,
               userId,
               reportId,
-              allPuzzles,
               1 // Number of teaser puzzles per category
             );
             
@@ -166,8 +169,8 @@ const ReportDisplay = () => {
       // Check if user has one-time unlock for this report
       const hasUnlock = await puzzleAccessService.checkOneTimeUnlock(user.id, reportId);
       
-      // Check if user has active subscription (from user profile)
-      const hasSubscription = user?.subscription_status === 'active' || false;
+      // Check if user has active subscription
+      const hasSubscription = await userProfileService.hasActiveSubscription(user.id);
       
       setPuzzleAccessData({
         totalPuzzles: puzzleSummary.total || 0,
@@ -176,6 +179,8 @@ const ReportDisplay = () => {
         hasActiveSubscription: hasSubscription,
         hasOneTimeUnlock: hasUnlock
       });
+
+      setCanAccessPuzzles(Boolean(hasSubscription || hasUnlock));
       
       console.log('✅ Loaded puzzle access data:', {
         total: puzzleSummary.total,
@@ -219,6 +224,27 @@ const ReportDisplay = () => {
   const handleUnlockAllPuzzles = () => {
     // TODO: Integrate with Stripe payment flow
     toast.success('Payment integration coming soon!');
+  };
+
+  const renderTeaserLockBar = (categoryKey, goTo) => {
+    const info = getPuzzleAccessInfo(categoryKey);
+    if (!info) return null;
+    const locked = info.locked || 0;
+    if (locked <= 0) return null;
+    return (
+      <div className="mt-3 p-3 border border-amber-200 bg-amber-50 rounded-lg">
+        <div className="text-sm text-amber-800">
+          {info.free} free teaser{info.free === 1 ? '' : 's'} • {locked} locked puzzles
+        </div>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button onClick={() => navigate('/pricing')} className="px-3 py-2 text-sm rounded-md bg-green-600 hover:bg-green-700 text-white font-semibold">Unlock Puzzles</button>
+          <button onClick={() => navigate('/pricing')} className="px-3 py-2 text-sm rounded-md bg-gray-900 hover:bg-black text-white font-semibold">One-Time Pack ($4.99)</button>
+          {goTo && (
+            <button onClick={goTo} className="px-3 py-2 text-sm rounded-md bg-white border border-gray-300 hover:bg-gray-50 text-gray-800 font-semibold">View Teaser</button>
+          )}
+        </div>
+      </div>
+    );
   };
 
   useEffect(() => {

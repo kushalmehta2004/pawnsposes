@@ -7,11 +7,15 @@ import { Chess } from 'chess.js';
 import Chessboard from '../components/Chessboard';
 import puzzleGenerationService from '../services/puzzleGenerationService';
 import { initializePuzzleDatabase, getPuzzleDatabase } from '../utils/puzzleDatabase';
+import { useAuth } from '../contexts/AuthContext';
+import userProfileService from '../services/userProfileService';
+import UpgradePrompt from '../components/UpgradePrompt';
 
 const PuzzlePage = () => {
   const { puzzleType } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
   
   const [currentPuzzle, setCurrentPuzzle] = useState(0);
   const [feedback, setFeedback] = useState('');
@@ -25,6 +29,8 @@ const PuzzlePage = () => {
   const [resetCounter, setResetCounter] = useState(0);
   const [difficulty, setDifficulty] = useState('easy');
   const [fullPuzzles, setFullPuzzles] = useState([]);
+  const [canAccess, setCanAccess] = useState(true);
+  const [showUpgradeNotice, setShowUpgradeNotice] = useState(false);
 
   // Get analysis data and username from location state
   const analysisData = location.state?.analysis;
@@ -47,8 +53,29 @@ const PuzzlePage = () => {
     deps.push(difficulty);
   }
   useEffect(() => {
-    loadPuzzles();
+    const gatedLoad = async () => {
+      try {
+        if (!user?.id) {
+          setCanAccess(false);
+        } else {
+          const allowed = await userProfileService.canAccessPuzzles(user.id);
+          setCanAccess(!!allowed);
+        }
+      } catch (_) {
+        setCanAccess(false);
+      }
+      await loadPuzzles();
+    };
+    gatedLoad();
   }, deps);
+
+  // Ensure teaser enforcement after puzzles/canAccess are known
+  useEffect(() => {
+    if (!canAccess && fullPuzzles && fullPuzzles.length > 0) {
+      setPuzzles(fullPuzzles.slice(0, 1));
+      setCurrentPuzzle(0);
+    }
+  }, [canAccess, fullPuzzles]);
 
   // Keep board orientation in sync with current FEN while puzzle is active
   useEffect(() => {
@@ -364,8 +391,14 @@ const PuzzlePage = () => {
         }
       }
 
-      setPuzzles(initialized);
-      setFullPuzzles(initialized);
+      // For free users: show only 1 teaser puzzle on this page
+      if (!canAccess) {
+        setPuzzles(initialized.slice(0, 1));
+        setFullPuzzles(initialized);
+      } else {
+        setPuzzles(initialized);
+        setFullPuzzles(initialized);
+      }
       setPuzzleMetadata(metadata);
       setCurrentPuzzle(0); // Reset to first puzzle when regenerating
       // Set board orientation based on starting FEN of first puzzle
@@ -403,6 +436,10 @@ const PuzzlePage = () => {
   };
 
   const handleNextPuzzle = () => {
+    if (!canAccess) {
+      setShowUpgradeNotice(true);
+      return;
+    }
     if (currentPuzzle < puzzles.length - 1) {
       setCurrentPuzzle(currentPuzzle + 1);
       setFeedback('');
@@ -607,6 +644,11 @@ const PuzzlePage = () => {
               <div className="text-sm text-gray-500">
                 Puzzle {currentPuzzle + 1} of {puzzles.length}
               </div>
+              {!canAccess && (
+                <div className="text-xs text-amber-700 mt-1">
+                  Free teaser: showing 1 of {fullPuzzles?.length || puzzles.length}. Unlock the rest below.
+                </div>
+              )}
               {puzzle?.source && (
                 <div className={`puzzle-source-badge text-xs mt-1 px-2 py-1 rounded-full inline-block ${
                   puzzle.source === 'user_game' ? 'bg-green-100 text-green-700' :
@@ -791,7 +833,7 @@ const PuzzlePage = () => {
                   </button>
                   <button
                     onClick={handleNextPuzzle}
-                    disabled={currentPuzzle === puzzles.length - 1}
+                    disabled={!canAccess || currentPuzzle === puzzles.length - 1}
                     className="px-4 py-3 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-400 text-sm font-semibold flex items-center justify-center shadow-md"
                   >
                     Next →
@@ -849,6 +891,20 @@ const PuzzlePage = () => {
                     : 'bg-yellow-100 text-yellow-800 border border-yellow-200'
                 }`}>
                   {feedback}
+                </div>
+              )}
+
+              {/* Inline notice when free user tries Next */}
+              {!canAccess && showUpgradeNotice && (
+                <div className="mt-4 p-3 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-sm">
+                  You are on the free plan. Subscribe or buy a one-time pack to access the remaining puzzles in this section.
+                </div>
+              )}
+
+              {/* Upgrade prompt inline for free users */}
+              {!canAccess && (
+                <div className="mt-6">
+                  <UpgradePrompt title="Unlock All Puzzles in This Set" description="Subscribe or buy a one-time pack to access the full personalized puzzle set generated from your games." />
                 </div>
               )}
             </motion.div>
