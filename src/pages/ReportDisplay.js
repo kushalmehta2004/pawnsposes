@@ -43,6 +43,9 @@ const ReportDisplay = () => {
   const [isLoadingAccessData, setIsLoadingAccessData] = useState(false);
   const [canAccessPuzzles, setCanAccessPuzzles] = useState(true);
 
+  // Track puzzle generation status
+  const [isPuzzleGenerating, setIsPuzzleGenerating] = useState(false);
+
   // Background pre-generation of puzzles for Fix My Weaknesses and Learn From My Mistakes
   const prewarmUserPuzzles = async (analysisData) => {
     try {
@@ -66,6 +69,9 @@ const ReportDisplay = () => {
       REPORT_DISPLAY_CACHE.puzzlesGenerated.add(username);
       console.log(`🔒 Locked puzzle generation for ${username} - preventing concurrent calls`);
 
+      // Set generating status to true
+      setIsPuzzleGenerating(true);
+
       // Disable prewarm cache for fix-weaknesses; only prewarm learn-mistakes if desired
       await initializePuzzleDatabase();
       const db = getPuzzleDatabase();
@@ -77,6 +83,7 @@ const ReportDisplay = () => {
       // If puzzles already exist in cache, skip generation
       if (cachedLearn?.puzzles?.length >= 20) {
         console.log(`♻️ Found ${cachedLearn.puzzles.length} cached puzzles for ${username} - using cached version`);
+        setIsPuzzleGenerating(false);
         return;
       }
 
@@ -136,11 +143,15 @@ const ReportDisplay = () => {
         } else {
           console.warn('⚠️ Missing userId or reportId - skipping Supabase puzzle storage');
         }
+
+        // Set generating status to false when complete
+        setIsPuzzleGenerating(false);
       } else {
         console.warn(`⚠️ Only generated ${learnDistinct.length} puzzles - NOT caching (need 20 minimum)`);
         console.warn(`💡 Import more games to generate the full set of 20 puzzles`);
         // Remove lock so it can be retried with more games
         REPORT_DISPLAY_CACHE.puzzlesGenerated.delete(username);
+        setIsPuzzleGenerating(false);
       }
     } catch (e) {
       console.warn('⚠️ Background puzzle prewarm failed (continuing without blocking):', e);
@@ -149,6 +160,7 @@ const ReportDisplay = () => {
       if (username) {
         REPORT_DISPLAY_CACHE.puzzlesGenerated.delete(username);
       }
+      setIsPuzzleGenerating(false);
     }
   };
 
@@ -3555,18 +3567,53 @@ Guidelines:
 
               {/* Positional Puzzles (Learn From Mistakes) */}
               <div 
-                className="training-option clickable"
-                onClick={() => navigate('/puzzle/learn-mistakes', { state: { analysis } })}
+                className={`training-option ${isPuzzleGenerating ? 'locked' : 'clickable'}`}
+                onClick={() => {
+                  if (!isPuzzleGenerating) {
+                    navigate('/puzzle/learn-mistakes', { state: { analysis } });
+                  }
+                }}
+                style={{ 
+                  opacity: isPuzzleGenerating ? 0.6 : 1,
+                  cursor: isPuzzleGenerating ? 'not-allowed' : 'pointer'
+                }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div style={{ flex: 1 }}>
-                    <h4>Learn From My Mistakes</h4>
+                    <h4>
+                      Learn From My Mistakes
+                      {isPuzzleGenerating && (
+                        <Lock size={16} style={{ marginLeft: '0.5rem', display: 'inline', verticalAlign: 'middle' }} />
+                      )}
+                    </h4>
                     <p>Puzzles you missed in-game</p>
-                    {(() => {
-                      const accessInfo = getPuzzleAccessInfo('positional');
-                      if (accessInfo.total > 0) {
-                        return (
-                          <div style={{ fontSize: '0.85rem', marginTop: '0.5rem', color: 'var(--text-light-color)' }}>
+                    {isPuzzleGenerating ? (
+                      <div style={{ 
+                        fontSize: '0.85rem', 
+                        marginTop: '0.5rem', 
+                        color: 'var(--primary-color)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem'
+                      }}>
+                        <span style={{ 
+                          width: '12px', 
+                          height: '12px', 
+                          border: '2px solid var(--primary-color)',
+                          borderTopColor: 'transparent',
+                          borderRadius: '50%',
+                          display: 'inline-block',
+                          animation: 'spin 1s linear infinite'
+                        }}></span>
+                        <span>Generating puzzles...</span>
+                      </div>
+                    ) : (
+                      <>
+                        {(() => {
+                          const accessInfo = getPuzzleAccessInfo('positional');
+                          if (accessInfo.total > 0) {
+                            return (
+                              <div style={{ fontSize: '0.85rem', marginTop: '0.5rem', color: 'var(--text-light-color)' }}>
                             {accessInfo.hasAccess ? (
                               <span style={{ color: 'var(--success-color)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                                 <Unlock size={14} /> {accessInfo.total} puzzles unlocked
@@ -3584,25 +3631,40 @@ Guidelines:
                       }
                       return null;
                     })()}
+                      </>
+                    )}
                   </div>
-                  {(() => {
-                    const accessInfo = getPuzzleAccessInfo('positional');
-                    if (accessInfo.free > 0 && !accessInfo.hasAccess) {
-                      return (
-                        <span style={{ 
-                          fontSize: '0.75rem', 
-                          padding: '0.25rem 0.5rem', 
-                          backgroundColor: 'var(--success-color)', 
-                          color: 'white', 
-                          borderRadius: '4px',
-                          fontWeight: '600'
-                        }}>
-                          FREE TEASER
-                        </span>
-                      );
-                    }
-                    return null;
-                  })()}
+                  {isPuzzleGenerating ? (
+                    <span style={{ 
+                      fontSize: '0.75rem', 
+                      padding: '0.25rem 0.5rem', 
+                      backgroundColor: 'var(--primary-color)', 
+                      color: 'white', 
+                      borderRadius: '4px',
+                      fontWeight: '600'
+                    }}>
+                      GENERATING
+                    </span>
+                  ) : (
+                    (() => {
+                      const accessInfo = getPuzzleAccessInfo('positional');
+                      if (accessInfo.free > 0 && !accessInfo.hasAccess) {
+                        return (
+                          <span style={{ 
+                            fontSize: '0.75rem', 
+                            padding: '0.25rem 0.5rem', 
+                            backgroundColor: 'var(--success-color)', 
+                            color: 'white', 
+                            borderRadius: '4px',
+                            fontWeight: '600'
+                          }}>
+                            FREE TEASER
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()
+                  )}
                 </div>
               </div>
 
