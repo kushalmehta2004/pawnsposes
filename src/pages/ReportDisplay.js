@@ -46,6 +46,43 @@ const ReportDisplay = () => {
   // Track puzzle generation status
   const [isPuzzleGenerating, setIsPuzzleGenerating] = useState(false);
 
+  // Check if puzzles are ready in the database
+  const checkPuzzleReadiness = async (username) => {
+    if (!username || username === 'Unknown') {
+      setIsPuzzleGenerating(false);
+      return true; // No username, so don't block
+    }
+
+    try {
+      await initializePuzzleDatabase();
+      const db = getPuzzleDatabase();
+      const version = 'v11-adaptive-4to16plies';
+      const keyFor = (type) => `pawnsposes:puzzles:${username}:${type}:${version}`;
+
+      const cachedLearn = await db.getSetting(keyFor('learn-mistakes'), null);
+
+      // Check if puzzles are ready (at least 20 puzzles cached)
+      const puzzlesReady = cachedLearn?.puzzles?.length >= 20;
+      
+      if (puzzlesReady) {
+        console.log(`✅ Puzzles are ready for ${username} (${cachedLearn.puzzles.length} puzzles found)`);
+        setIsPuzzleGenerating(false);
+        return true;
+      } else {
+        // Check if generation is in progress
+        const isGenerating = REPORT_DISPLAY_CACHE.puzzlesGenerated.has(username);
+        console.log(`⏳ Puzzles not ready for ${username}. Generation in progress: ${isGenerating}`);
+        setIsPuzzleGenerating(isGenerating);
+        return false;
+      }
+    } catch (error) {
+      console.error('❌ Error checking puzzle readiness:', error);
+      setIsPuzzleGenerating(false);
+      return true; // Don't block on error
+    }
+  };
+
+
   // Background pre-generation of puzzles for Fix My Weaknesses and Learn From My Mistakes
   const prewarmUserPuzzles = async (analysisData) => {
     try {
@@ -317,6 +354,11 @@ const ReportDisplay = () => {
     if (analysisData && (!hasMetrics || !hasWeaknesses) && !location.state?.performanceMetrics && !performanceMetrics) {
       calculatePerformanceMetrics(analysisData);
     }
+
+    // Check puzzle readiness on mount (important for when user navigates back)
+    if (analysisData && username && username !== 'Unknown') {
+      checkPuzzleReadiness(username);
+    }
   
     // Kick off background puzzle pre-generation ONLY ONCE per user
     // The function has internal checks to prevent duplicate generation
@@ -329,6 +371,20 @@ const ReportDisplay = () => {
       loadPuzzleAccessData(analysisData.reportId);
     }
   }, [location.state?.analysis, location.state?.performanceMetrics, navigate]);
+  // Poll for puzzle readiness while generating
+  useEffect(() => {
+   if (!isPuzzleGenerating || !analysis) return;
+   const username = analysis?.username || analysis?.rawAnalysis?.username || analysis?.formData?.username;
+   if (!username || username === 'Unknown') return;
+   // Poll every 2 seconds to check if puzzles are ready
+   const pollInterval = setInterval(async () => {
+     const ready = await checkPuzzleReadiness(username);
+     if (ready) {
+       clearInterval(pollInterval);
+     }
+   }, 2000);
+   return () => clearInterval(pollInterval);
+  }, [isPuzzleGenerating, analysis]);
 
   // Calculate performance metrics: JavaScript for stats + Gemini for openings
   const calculatePerformanceMetrics = async (analysisData) => {

@@ -24,6 +24,7 @@ import {
 import puzzleDataService from '../services/puzzleDataService';
 import mistakeAnalysisService from '../services/mistakeAnalysisService';
 import reportService from '../services/reportService';
+import puzzlePrefetchService from '../services/puzzlePrefetchService';
 import { validateAndEnforceGameDiversity, enhancePromptWithGameDiversity } from '../utils/gameDiversityValidator';
 
 // Calculate dynamic statistics from actual games
@@ -916,6 +917,21 @@ EXPLANATION STYLE: Use precise chess terminology. Include deep strategic and tac
             console.error('❌ Failed to save report to Supabase:', saveError);
             // Don't block navigation if save fails - puzzles will work without access control
           }
+          }
+
+        // ✅ PUZZLE PRE-FETCH: Start pre-fetching puzzles in the background
+        // This ensures puzzles are ready when user navigates to puzzle pages
+        // Pre-fetch happens asynchronously and doesn't block navigation
+        if (formData.username) {
+          console.log('🧩 Starting background puzzle pre-fetch...');
+          puzzlePrefetchService.prefetchAllPuzzles(formData.username, completeAnalysisResult)
+            .then(result => {
+              console.log('✅ Background puzzle pre-fetch completed:', result);
+            })
+            .catch(error => {
+              console.warn('⚠️ Background puzzle pre-fetch failed (non-critical):', error);
+              // Don't show error to user - puzzles will be generated on-demand if pre-fetch fails
+            });
         }
 
         // Navigate to the report display page with the complete analysis data

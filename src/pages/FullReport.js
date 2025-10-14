@@ -596,8 +596,7 @@ const FullReport = () => {
         }
         
         .checklist-item {
-          display: flex;
-          align-items: flex-start;
+          display: block;
           padding: 0.75rem;
           border-radius: 0.5rem;
           background-color: #f8fafc;
@@ -1775,28 +1774,44 @@ const FullReport = () => {
               </div>
             </section>
 
-            {/* Section 4: Action Plan */}
+            {/* Section 4: Action Plan - Mental Checklist */}
             <section className="action-plan" style={{ marginBottom: '2rem' }}>
               <h2 className="section-header">
                 <i className="fas fa-bullseye"></i>Actionable Improvement Plan
               </h2>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div style={{ marginBottom: '1rem' }}>
+                <p style={{ 
+                  fontSize: '1rem', 
+                  fontWeight: '600', 
+                  color: '#1f2937',
+                  marginBottom: '0.75rem'
+                }}>
+                  Your 3-Step Mental Checklist For Every Game:
+                </p>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 {actionPlan?.items?.length > 0 ? (
                   actionPlan.items.map((item, index) => (
-                    <div key={index} className="checklist-item">
-                      <span style={{ 
-                        color: index === 0 ? '#dc2626' : index === 1 ? '#dc2626' : '#d97706', 
-                        fontWeight: '700', 
-                        fontSize: '1.125rem', 
-                        marginRight: '1rem' 
+                    <div key={index} className="checklist-item" style={{ 
+                      padding: '1rem',
+                      borderLeft: '4px solid #10b981',
+                      backgroundColor: '#f9fafb'
+                    }}>
+                      <div style={{ marginBottom: '0.5rem' }}>
+                        <strong style={{ 
+                          fontWeight: '700', 
+                          color: '#059669',
+                          fontSize: '1rem'
+                        }}>
+                          {item.title || `Rule ${index + 1}`}
+                        </strong>
+                      </div>
+                      <div style={{ 
+                        color: '#374151',
+                        fontSize: '0.95rem',
+                        lineHeight: '1.6'
                       }}>
-                        {index < 2 ? 'HIGH' : 'MED'}
-                      </span>
-                      <div>
-                        <strong style={{ fontWeight: '600', color: '#1f2937' }}>
-                          {item.title || `Focus Area ${index + 1}`}
-                        </strong> {item.plan || item.advice || item.summary || 'Practice this area with targeted drills and review annotated examples.'}
-
+                        {item.plan || item.advice || item.summary || 'Apply this mental rule during your games.'}
                       </div>
                     </div>
                   ))
@@ -1804,39 +1819,28 @@ const FullReport = () => {
                   <div className="checklist-item">
                     <span style={{ color: '#6b7280', fontWeight: '700', fontSize: '1.125rem', marginRight: '1rem' }}>…</span>
                     <div>
-                      <strong style={{ fontWeight: '600', color: '#1f2937' }}>Generating:</strong> Creating a personalized, weakness-aware action plan…
+                      <strong style={{ fontWeight: '600', color: '#1f2937' }}>Generating:</strong> Creating your personalized 3-step mental checklist…
                     </div>
                   </div>
                 ) : (recurringWeaknesses && recurringWeaknesses.length > 0) ? (
-                  recurringWeaknesses.slice(0, 3).map((weakness, index) => (
-                    <div key={index} className="checklist-item">
-                      <span style={{ 
-                        color: index === 0 ? '#dc2626' : index === 1 ? '#dc2626' : '#d97706', 
-                        fontWeight: '700', 
-                        fontSize: '1.125rem', 
-                        marginRight: '1rem' 
-                      }}>
-                        {index < 2 ? 'HIGH' : 'MED'}
-                      </span>
-                      <div>
-                        <strong style={{ fontWeight: '600', color: '#1f2937' }}>
-                          {weakness.title || `Focus Area ${index + 1}`}:
-                        </strong> {weakness.betterPlan || weakness.actionPlan || weakness.recommendation || weakness.subtitle || 'Work on this area through focused practice and study.'}
-                      </div>
+                  <div className="checklist-item">
+                    <span style={{ color: '#6b7280', fontWeight: '700', fontSize: '1.125rem', marginRight: '1rem' }}>⏳</span>
+                    <div>
+                      <strong style={{ fontWeight: '600', color: '#1f2937' }}>Mental Checklist Pending:</strong> Your personalized mental checklist will be generated based on your weaknesses.
                     </div>
-                  ))
+                  </div>
                 ) : performanceMetrics?.focusArea ? (
                   <div className="checklist-item">
-                    <span style={{ color: '#dc2626', fontWeight: '700', fontSize: '1.125rem', marginRight: '1rem' }}>HIGH</span>
+                    <span style={{ color: '#6b7280', fontWeight: '700', fontSize: '1.125rem', marginRight: '1rem' }}>⏳</span>
                     <div>
-                      <strong style={{ fontWeight: '600', color: '#1f2937' }}>Primary Focus Area:</strong> Work on {performanceMetrics.focusArea.toLowerCase()} through targeted practice and study.
+                      <strong style={{ fontWeight: '600', color: '#1f2937' }}>Mental Checklist Pending:</strong> Your personalized mental checklist will be generated once weakness analysis is complete.
                     </div>
                   </div>
                 ) : (
                   <div className="checklist-item">
                     <span style={{ color: '#6b7280', fontWeight: '700', fontSize: '1.125rem', marginRight: '1rem' }}>PENDING</span>
                     <div>
-                      <strong style={{ fontWeight: '600', color: '#1f2937' }}>Position Analysis in Progress:</strong> Your personalized action plan will be generated once the FEN-based weakness analysis is complete.
+                      <strong style={{ fontWeight: '600', color: '#1f2937' }}>Position Analysis in Progress:</strong> Your personalized mental checklist will be generated once the FEN-based weakness analysis is complete.
                     </div>
                   </div>
                 )}

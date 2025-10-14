@@ -286,38 +286,48 @@ export const generateActionPlanFromWeaknesses = async (weaknesses, playerInfo = 
     if (!apiKey || apiKey === 'your_gemini_api_key_here') return null;
     if (!Array.isArray(weaknesses) || weaknesses.length === 0) return null;
 
-    // Compact payload: top 3 weaknesses (title + short description)
-    const compact = weaknesses.slice(0, 3).map(w => ({
+    // Compact payload: top 5 weaknesses (title + short description)
+    const compact = weaknesses.slice(0, 5).map(w => ({
       title: (w?.title || '').toString().slice(0, 80),
       description: (w?.description || w?.subtitle || w?.recommendation || '').toString().slice(0, 400)
     }));
 
     const { username, skillLevel, averageRating } = playerInfo || {};
 
-    const prompt = `You are a world-class chess coach. Create a personalized Actionable Improvement Plan for the player, strictly based on these weaknesses.
+    const prompt = `You are a world-class chess coach. Based on the player's weaknesses, create a 3-step mental checklist they can use BEFORE and DURING every game.
+
 Return ONLY strict JSON with this schema and nothing else:
 {
   "items": [
     {
-      "title": string, // set exactly to the provided weakness title
-      "plan": string   // 2–3 sentences, <= 240 chars; concrete, non-generic, rating-aware
+      "title": string, // A catchy rule name (e.g., "The Pawn Shield Rule", "The 10-Second Blunder Check")
+      "plan": string   // The actionable mental rule (2-3 sentences, <= 280 chars; concrete, specific, easy to remember)
     }
   ]
 }
+
 Rules:
-- Return EXACTLY one item per provided weakness, IN THE SAME ORDER.
-- Set item.title EXACTLY equal to the corresponding weakness title.
+- Return EXACTLY 3 items (3-step mental checklist).
+- Each item should be a MENTAL RULE or HABIT the player can apply in every game.
+- Make each rule SPECIFIC and ACTIONABLE (not generic advice).
+- Base the rules on the player's actual weaknesses: ${compact.map(w => w.title).join(', ')}.
+- Use directive, memorable language (e.g., "Before pushing a pawn near your king, state out loud what threat it stops. If you can't, don't push it.")
 - Tailor depth to ${skillLevel || 'Unknown level'}${averageRating ? ` (~${averageRating})` : ''}.
-- Directly address the listed weaknesses; avoid generic boilerplate.
-- Use directive style similar to: "Prioritize Positional Security over Immediate Gains" or "King Safety First".
-- Do NOT add bullet points, checklists, or questions. Only a concise 2–3 sentence plan.
+- Each rule should be something they can CHECK or DO during a game (not study advice).
+- Make titles catchy and memorable (use quotes like "The X Rule" or "The Y Principle").
+
+Examples of good mental checklist items:
+- "The Pawn Shield Rule": Before pushing a pawn on the f, g, or h-file, you must state out loud the concrete piece it supports or the specific threat it neutralizes. If you can't, don't push it.
+- "The 10-Second Blunder Check": Before making any move in a sharp position, pause for a full 10 seconds and ONLY look for your opponent's checks, captures, and threats.
+- "The Consolidate First Principle": After your opponent makes a huge blunder, your next move's goal is not to attack more. It's to find a quiet move that improves your king safety or your worst piece.
+
 Weaknesses: ${JSON.stringify(compact)}
 Player: ${username || 'the player'}`;
 
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 400 } })
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.4, maxOutputTokens: 600 } })
     });
 
     if (!response.ok) return null;
@@ -338,17 +348,14 @@ Player: ${username || 'the player'}`;
     // Normalize and validate
     if (!parsed || !Array.isArray(parsed.items)) return null;
 
-    // Align plans 1:1 with provided weaknesses (preserve order and titles)
-    const maxItems = Math.min(compact.length, parsed.items.length, 3);
-
     const clampText = (s, n) => (s || '').toString().trim().slice(0, n);
+    const removeQuotes = (s) => s.replace(/^["']|["']$/g, ''); // Remove leading/trailing quotes
 
-    const items = Array.from({ length: maxItems }, (_, idx) => {
-      const src = parsed.items[idx] || {};
-      const title = clampText(compact[idx].title, 80);
-      let plan = clampText(src.plan || src.advice || src.summary || '', 240);
-      return { title, plan };
-    }).filter(i => i.plan);
+    // Extract exactly 3 mental checklist items
+    const items = parsed.items.slice(0, 3).map(item => ({
+      title: removeQuotes(clampText(item.title || '', 100)),
+      plan: clampText(item.plan || item.advice || item.summary || '', 280)
+    })).filter(i => i.title && i.plan);
 
     if (items.length === 0) return null;
     return { items };

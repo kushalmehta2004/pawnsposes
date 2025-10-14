@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { Chess } from 'chess.js';
 import Chessboard from '../components/Chessboard';
 import puzzleGenerationService from '../services/puzzleGenerationService';
+import puzzlePrefetchService from '../services/puzzlePrefetchService';
 import { initializePuzzleDatabase, getPuzzleDatabase } from '../utils/puzzleDatabase';
 import { useAuth } from '../contexts/AuthContext';
 import userProfileService from '../services/userProfileService';
@@ -105,7 +106,33 @@ const PuzzlePage = () => {
     try {
       console.log(`🧩 Loading ${puzzleType} puzzles for ${username}...`);
       
-      // 1) Try to reuse cached puzzles for this user+category
+      // ✅ PRIORITY 1: Try to use pre-fetched puzzles from puzzlePrefetchService
+      // This provides instant loading for all puzzle types except learn-mistakes
+      if (['fix-weaknesses', 'master-openings', 'sharpen-endgame'].includes(puzzleType)) {
+        const prefetchedData = await puzzlePrefetchService.getCachedPuzzles(username, puzzleType, difficulty);
+        if (prefetchedData && Array.isArray(prefetchedData.puzzles) && prefetchedData.puzzles.length > 0) {
+          console.log(`⚡ Using pre-fetched puzzles for ${puzzleType} (${difficulty}):`, prefetchedData.puzzles.length);
+          const initialized = prefetchedData.puzzles.map(p => ({
+            ...p,
+            initialPosition: p.initialPosition || p.position,
+            position: p.position || p.initialPosition,
+            lineIndex: typeof p.lineIndex === 'number' ? p.lineIndex : (typeof p.startLineIndex === 'number' ? p.startLineIndex : 0),
+            startLineIndex: typeof p.startLineIndex === 'number' ? p.startLineIndex : 0,
+            sideToMove: p.sideToMove || ((p.position || '').split(' ')[1] === 'b' ? 'black' : 'white')
+          }));
+          setPuzzles(initialized);
+          setFullPuzzles(initialized);
+          setPuzzleMetadata(prefetchedData.metadata || {});
+          setCurrentPuzzle(0);
+          const firstFen = initialized[0]?.position || initialized[0]?.initialPosition;
+          const firstSide = (firstFen && firstFen.split(' ')[1] === 'b') ? 'black' : 'white';
+          setOrientation(firstSide);
+          setIsLoading(false);
+          return;
+        }
+      }
+      
+      // 2) Fallback: Try to reuse cached puzzles for this user+category (old cache system)
       const cacheKey = getCacheKey();
       let cached = null;
       // Disable IndexedDB cache for fix-weaknesses (always fetch from shards)
@@ -382,12 +409,22 @@ const PuzzlePage = () => {
       });
 
       // 2) Persist snapshot for this user+category to keep puzzles stable across navigation
+      // Use both old cache system and new pre-fetch service for redundancy
       if (puzzleType !== 'fix-weaknesses') {
         try {
           const db = getPuzzleDatabase();
           await db.saveSetting(cacheKey, { puzzles: initialized, metadata, savedAt: Date.now() });
         } catch (e) {
           console.warn('⚠️ Failed to persist puzzle snapshot; proceeding without cache.', e);
+        }
+      }
+      
+      // ✅ Also cache using the new pre-fetch service for consistency
+      if (['fix-weaknesses', 'master-openings', 'sharpen-endgame'].includes(puzzleType)) {
+        try {
+          await puzzlePrefetchService.cachePuzzles(username, puzzleType, initialized, metadata, difficulty);
+        } catch (e) {
+          console.warn('⚠️ Failed to cache puzzles in pre-fetch service; proceeding without cache.', e);
         }
       }
 
