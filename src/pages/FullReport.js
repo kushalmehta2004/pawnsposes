@@ -910,28 +910,42 @@ const FullReport = () => {
                   </p>
                 </div>
               </div>
-              <div>
-                <h3 style={{ fontWeight: '700', color: '#1f2937', marginBottom: '0.5rem' }}>Key Insights:</h3>
-                <ul style={{ listStyleType: 'disc', paddingLeft: '1.25rem', fontSize: '0.875rem', color: '#4b5563', lineHeight: '1.5' }}>
-                  {performanceMetrics?.keyInsights?.length > 0 ? (
-                    performanceMetrics.keyInsights.map((insight, index) => (
-                      <li key={index} style={{ marginBottom: '0.25rem' }}>{insight}</li>
-                    ))
-                  ) : (
-                    <>
-                      <li>Tends to drift in closed or positional middlegames; needs to proactively create plans.</li>
-                      <li>Can be overly aggressive in the opening, sacrificing material without always calculating fully.</li>
-                      <li>Shows promise in recognizing tactical patterns but needs to deepen calculation ability.</li>
-                    </>
-                  )}
-                </ul>
-              </div>
+              
+              {/* Executive Summary from Pawnsposes AI - Replaces Key Insights */}
+              {analysis?.pawnsposesAI?.executiveSummary && (
+                <div>
+                  <h3 style={{ fontWeight: '700', color: '#1f2937', marginBottom: '0.5rem' }}>Executive Summary:</h3>
+                  <p style={{ fontSize: '0.875rem', color: '#4b5563', lineHeight: '1.5' }}>
+                    {analysis.pawnsposesAI.executiveSummary}
+                  </p>
+                </div>
+              )}
             </section>
 
-            {/* Section 2: Recurring Weaknesses */}
+            {/* Section 2: Recurring Weaknesses - REMOVED: Now using Pawnsposes AI Analysis only */}
+            {false && (
             <section style={{ marginBottom: '2rem' }}>
-              <h2 className="section-header">
-                <i className="fas fa-magnifying-glass-chart"></i>Recurring Weaknesses
+              <h2 className="section-header" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <span style={{ display: 'flex', alignItems: 'center' }}>
+                  <i className="fas fa-magnifying-glass-chart"></i>Recurring Weaknesses
+                </span>
+                {dataSource === 'GeminiRecurringWeaknesses' && recurringWeaknesses && recurringWeaknesses.length > 0 && (
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.375rem',
+                    padding: '0.25rem 0.625rem',
+                    backgroundColor: '#dbeafe',
+                    color: '#1e40af',
+                    fontSize: '0.75rem',
+                    fontWeight: '600',
+                    borderRadius: '9999px',
+                    border: '1px solid #93c5fd'
+                  }}>
+                    <i className="fas fa-sparkles" style={{ fontSize: '0.625rem' }}></i>
+                    Gemini Verified
+                  </span>
+                )}
               </h2>
               
               {isAnalyzingWeaknesses ? (
@@ -1103,7 +1117,82 @@ const FullReport = () => {
                         );
                       }
 
-                      // Parse the description to extract different sections
+                      // ✅ NEW FORMAT: Check if weakness has new structure (gameInfo, mistake, betterPlan)
+                      if (weakness.gameInfo && weakness.mistake && weakness.betterPlan) {
+                        // Use new format directly - no parsing needed!
+                        const mainDescription = weakness.subtitle || weakness.description || '';
+                        const gameExamples = [{
+                          gameInfo: weakness.gameInfo,
+                          mistake: weakness.mistake,
+                          betterPlan: weakness.betterPlan
+                        }];
+                        
+                        return (
+                          <div key={index} style={{
+                            backgroundColor: '#f9fafb',
+                            padding: '1rem',
+                            borderRadius: '0.5rem',
+                            border: '1px solid #e5e7eb',
+                            marginBottom: '1rem'
+                          }}>
+                            <h3 style={{ 
+                              fontWeight: '700', 
+                              color: '#1f2937',
+                              marginBottom: '0.25rem'
+                            }}>
+                              {(weakness.title || '').replace(/"/g, '').replace(/^\s*Weakness\s*\d+\s*:\s*/i, '')}
+                            </h3>
+                            
+                            {/* Main Description (subtitle) */}
+                            {mainDescription && (
+                              <p style={{ 
+                                fontSize: '0.875rem', 
+                                color: '#6b7280', 
+                                marginTop: '0.25rem',
+                                marginBottom: '0.75rem',
+                                lineHeight: '1.6'
+                              }}>
+                                {mainDescription}
+                              </p>
+                            )}
+                            
+                            {/* Game Example */}
+                            <div style={{
+                              marginTop: '0.5rem',
+                              padding: '0.75rem',
+                              backgroundColor: 'white',
+                              borderLeft: '4px solid #ef4444',
+                              borderRadius: '0.25rem'
+                            }}>
+                              <p style={{ 
+                                fontSize: '0.75rem', 
+                                color: '#6b7280', 
+                                marginBottom: '0.25rem'
+                              }}>
+                                {weakness.gameInfo}
+                              </p>
+                              <p style={{ 
+                                fontSize: '0.875rem', 
+                                color: '#1f2937', 
+                                lineHeight: '1.5', 
+                                margin: 0 
+                              }}>
+                                <strong>Mistake:</strong> {weakness.mistake}
+                              </p>
+                              <p style={{ 
+                                fontSize: '0.875rem', 
+                                color: '#1f2937', 
+                                lineHeight: '1.5', 
+                                marginTop: '0.5rem' 
+                              }}>
+                                <strong>Better Plan:</strong> {weakness.betterPlan}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      }
+                      
+                      // ⚠️ OLD FORMAT FALLBACK: Parse the description to extract different sections
                       const fullDescription = weakness.description || '';
                       
                       // Split the description into sections
@@ -1431,6 +1520,146 @@ const FullReport = () => {
                 </div>
               )}
             </section>
+            )}
+
+            {/* Pawnsposes AI Analysis Section */}
+            {analysis?.pawnsposesAI && (
+              <section style={{ marginBottom: '2rem' }}>
+                <h2 className="section-header" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <span style={{ display: 'flex', alignItems: 'center' }}>
+                    <i className="fas fa-chess-king"></i>Recurring Weaknesses
+                  </span>
+                  
+                </h2>
+
+                {/* Executive Summary moved to Performance Summary section */}
+
+                {/* Recurring Weaknesses */}
+                {analysis.pawnsposesAI.recurringWeaknesses && analysis.pawnsposesAI.recurringWeaknesses.length > 0 && (
+                  <div style={{ marginBottom: '1.5rem' }}>
+                    <h3 style={{ 
+                      fontWeight: '700', 
+                      color: '#1f2937', 
+                      marginBottom: '1rem',
+                      fontSize: '1.125rem'
+                    }}>
+                    </h3>
+                    {analysis.pawnsposesAI.recurringWeaknesses.map((weakness, index) => (
+                      <div key={index} style={{
+                        backgroundColor: '#f9fafb',
+                        padding: '1.25rem',
+                        borderRadius: '0.5rem',
+                        border: '1px solid #e5e7eb',
+                        marginBottom: '1rem'
+                      }}>
+                        {/* Weakness Title */}
+                        <h4 style={{ 
+                          fontWeight: '700', 
+                          color: '#dc2626', 
+                          marginBottom: '0.5rem',
+                          fontSize: '1rem'
+                        }}>
+                          {index + 1}. {weakness.title}
+                        </h4>
+
+                        {/* Weakness Explanation */}
+                        {weakness.explanation && (
+                          <p style={{ 
+                            fontSize: '0.875rem', 
+                            color: '#4b5563', 
+                            marginBottom: '1rem',
+                            lineHeight: '1.6'
+                          }}>
+                            {weakness.explanation}
+                          </p>
+                        )}
+
+                        {/* Examples */}
+                        {weakness.examples && weakness.examples.length > 0 && (
+                          <div style={{ marginTop: '0.75rem' }}>
+                            <p style={{ 
+                              fontSize: '0.8rem', 
+                              fontWeight: '600', 
+                              color: '#6b7280',
+                              marginBottom: '0.5rem'
+                            }}>
+                              Example from your games:
+                            </p>
+                            {weakness.examples.slice(0, 1).map((example, exIdx) => (
+                              <div key={exIdx} style={{
+                                backgroundColor: 'white',
+                                padding: '0.75rem',
+                                borderLeft: '4px solid #ef4444',
+                                borderRadius: '0.25rem',
+                                marginBottom: '0.5rem'
+                              }}>
+                                {/* Game Context */}
+                                {example.gameNumber && example.moveNumber && (
+                                  <p style={{ 
+                                    fontSize: '0.75rem', 
+                                    color: '#6b7280',
+                                    marginBottom: '0.25rem'
+                                  }}>
+                                    Game {example.gameNumber}, Move {example.moveNumber}
+                                    {example.move && ` (${example.move})`}
+                                  </p>
+                                )}
+
+                                {/* Mistake Explanation */}
+                                {example.explanation && (
+                                  <p style={{ 
+                                    fontSize: '0.875rem', 
+                                    color: '#1f2937',
+                                    marginBottom: '0.5rem',
+                                    lineHeight: '1.5'
+                                  }}>
+                                    <strong>Why it's a mistake:</strong> {example.explanation}
+                                  </p>
+                                )}
+
+                                {/* Better Plan */}
+                                {example.betterPlan && (
+                                  <p style={{ 
+                                    fontSize: '0.875rem', 
+                                    color: '#059669',
+                                    margin: 0,
+                                    lineHeight: '1.5'
+                                  }}>
+                                    <strong>Better plan:</strong> {example.betterPlan}
+                                  </p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Superior Plan */}
+                        {weakness.superiorPlan && (
+                          <div style={{
+                            backgroundColor: '#ecfdf5',
+                            padding: '0.75rem',
+                            borderRadius: '0.25rem',
+                            marginTop: '0.75rem',
+                            border: '1px solid #a7f3d0'
+                          }}>
+                            <p style={{ 
+                              fontSize: '0.875rem', 
+                              color: '#065f46',
+                              margin: 0,
+                              lineHeight: '1.6'
+                            }}>
+                              <strong>Superior approach:</strong> {weakness.superiorPlan}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Middlegame Mastery, Endgame Technique, and Improvement Plan sections removed - focusing only on recurring weaknesses */}
+              </section>
+            )}
 
             {/* Engine Insights Section */}
             {engineInsights && (

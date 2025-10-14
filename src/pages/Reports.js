@@ -856,6 +856,19 @@ EXPLANATION STYLE: Use precise chess terminology. Include deep strategic and tac
         await delayedStepUpdate(4, 1000);
         const analysisResult = await performChessAnalysisWithGemini(allGamesFenData, fetchedGames, formData);
 
+
+         // ✅ PAWNSPOSES AI: Perform comprehensive Pawnsposes AI analysis
+        let pawnsposesAIAnalysis = null;
+        try {
+          console.log('🎯 Starting Pawnsposes AI analysis...');
+          setProgressPercent(85);
+          pawnsposesAIAnalysis = await performPawnsposesAIAnalysis(fetchedGames, allGamesFenData, formData);
+          console.log('✅ Pawnsposes AI analysis completed successfully');
+        } catch (pawnsposesError) {
+          console.error('❌ Pawnsposes AI analysis failed:', pawnsposesError);
+          // Continue without Pawnsposes AI if it fails
+        }
+
         // Add games data and FEN positions to the analysis result
         const completeAnalysisResult = {
           ...analysisResult,
@@ -864,7 +877,8 @@ EXPLANATION STYLE: Use precise chess terminology. Include deep strategic and tac
           fenPositions: allGamesFenData.flatMap(game => game.fenPositions),
           allGamesFenData: allGamesFenData, // ✅ Add complete FEN data per game
           username: formData.username, // ✅ Also store the username
-          recurringWeaknesses: analysisResult?.recurringWeaknesses || []
+          recurringWeaknesses: pawnsposesAIAnalysis?.recurringWeaknesses || [], // ✅ Use Pawnsposes AI weaknesses only
+          pawnsposesAI: pawnsposesAIAnalysis // ✅ Add Pawnsposes AI analysis
         };
         
         setProgressPercent(100);
@@ -973,15 +987,9 @@ EXPLANATION STYLE: Use precise chess terminology. Include deep strategic and tac
       const comprehensiveResult = await callUnifiedGeminiAPI(gamesForAnalysis, formData);
       
             
-      // ✅ NEW: Add recurring weaknesses analysis with FEN data
-      try {
-        const recurringWeaknessesResult = await analyzeRecurringWeaknessesWithGemini(fenData, games, formData);
-        comprehensiveResult.recurringWeaknesses = recurringWeaknessesResult.weaknesses || [];
-        console.log('✅ Enhanced with FEN-based recurring weaknesses:', comprehensiveResult.recurringWeaknesses.length);
-      } catch (weaknessError) {
-        console.warn('⚠️ Recurring weaknesses analysis failed, using fallback:', weaknessError.message);
-        // Keep existing weaknesses from unified analysis as fallback
-      }
+      // ✅ REMOVED: Old recurring weaknesses analysis - now using Pawnsposes AI only
+      // The old analyzeRecurringWeaknessesWithGemini call has been removed
+      // All weakness analysis is now handled by performPawnsposesAIAnalysis
 
       console.log('✅ Complete unified analysis result:', comprehensiveResult);
       return comprehensiveResult;
@@ -1288,23 +1296,23 @@ Use the context-aware position analysis above to provide deeper, more targeted i
       - Connect the weakness to the player's skill level and rating range
    d. Provide improvement suggestions appropriate for their level
 
-3. **Phase-Specific Analysis:**
-   Based on the game phase contexts in the key positions:
-   a. **Opening Phase:** Analyze development and principle adherence from opening positions
-   b. **Middlegame Transitions:** Focus on positions marked as phase transitions
-   c. **Endgame Technique:** Evaluate technique from endgame positions
+// 3. **Phase-Specific Analysis:**
+//    Based on the game phase contexts in the key positions:
+//    a. **Opening Phase:** Analyze development and principle adherence from opening positions
+//    b. **Middlegame Transitions:** Focus on positions marked as phase transitions
+//    c. **Endgame Technique:** Evaluate technique from endgame positions
 
-4. **Critical Moment Analysis:**
-   Focus on positions marked as "critical" priority:
-   - Analyze the blunders/inaccuracies that led to these positions
-   - Explain the thinking patterns that need improvement
-   - Provide specific move recommendations for similar positions
+// 4. **Critical Moment Analysis:**
+//    Focus on positions marked as "critical" priority:
+//    - Analyze the blunders/inaccuracies that led to these positions
+//    - Explain the thinking patterns that need improvement
+//    - Provide specific move recommendations for similar positions
 
-5. **Skill-Level Appropriate Improvement Plan:**
-   Customized for ${playerSkill.skillLevel} level (${playerSkill.averageRating ? `~${playerSkill.averageRating} rating` : 'unrated'}):
-   a. 3-step improvement checklist appropriate for their level
-   b. YouTube video recommendation matching their skill level
-   c. Master game suggestion with positions similar to their weaknesses
+// 5. **Skill-Level Appropriate Improvement Plan:**
+//    Customized for ${playerSkill.skillLevel} level (${playerSkill.averageRating ? `~${playerSkill.averageRating} rating` : 'unrated'}):
+//    a. 3-step improvement checklist appropriate for their level
+//    b. YouTube video recommendation matching their skill level
+//    c. Master game suggestion with positions similar to their weaknesses
 
 **IMPORTANT:** Reference the specific context-aware position analysis throughout your response. Use the game phases, priorities, and reasons provided for each position to give targeted, relevant advice.`;
 
@@ -2041,12 +2049,15 @@ Keep examples concise and actionable.
     
     try {
       console.log('🔍 Parsing weakness analysis response...');
-      
+      console.log('📄 Analysis text length:', analysisText.length);
+      console.log('📄 First 500 chars:', analysisText.substring(0, 500));
+       
       // No fallback - force AI to provide specific analysis or fail
       console.log('🔍 Analyzing response for specific game references...');
       
       // Split by weakness sections
       const weaknessSections = analysisText.split(/\*\*WEAKNESS_\d+:/);
+      console.log('📊 Found', weaknessSections.length - 1, 'weakness sections');
       
       for (let i = 1; i < weaknessSections.length && i <= 3; i++) {
         const section = weaknessSections[i];
@@ -2062,25 +2073,25 @@ Keep examples concise and actionable.
         const subtitleMatch = section.match(/\*\*SUBTITLE:\*\*\s*([^\n*]+)/);
         const subtitle = subtitleMatch ? subtitleMatch[1].trim() : '';
         
-        // Extract examples (3 per weakness)
-        const example1Match = section.match(/\*\*EXAMPLE_1:\*\*\s*([^\n*]+)/);
-        const example2Match = section.match(/\*\*EXAMPLE_2:\*\*\s*([^\n*]+)/);
-        const example3Match = section.match(/\*\*EXAMPLE_3:\*\*\s*([^\n*]+)/);
+        // ✅ UPDATED: Extract new format fields (GAME_INFO, MISTAKE, BETTER_PLAN)
+        const gameInfoMatch = section.match(/\*\*GAME_INFO:\*\*\s*([^\n*]+)/);
+        const mistakeMatch = section.match(/\*\*MISTAKE:\*\*\s*([^\n]+?)(?=\*\*BETTER_PLAN|\*\*WEAKNESS|$)/s);
+        const betterPlanMatch = section.match(/\*\*BETTER_PLAN:\*\*\s*([^\n]+?)(?=FEN:|$)/s);
+        const fenMatch = section.match(/FEN:\s*([^\n]+)/);
         
-        const example1 = example1Match ? example1Match[1].trim() : '';
-        const example2 = example2Match ? example2Match[1].trim() : '';
-        const example3 = example3Match ? example3Match[1].trim() : '';
-        
-        // Extract better plan
-        const betterPlanMatch = section.match(/\*\*BETTER_PLAN:\*\*\s*([^\n*]+)/);
+        const gameInfo = gameInfoMatch ? gameInfoMatch[1].trim() : '';
+        const mistake = mistakeMatch ? mistakeMatch[1].trim() : '';
         const betterPlan = betterPlanMatch ? betterPlanMatch[1].trim() : '';
         
-        // ✅ UPDATED: Validate new format - "vs. opponent (Move X)" or "Game X"
-        const hasSpecificMoves = (example1.includes('vs.') && example1.includes('Move')) ||
-                                (example2.includes('vs.') && example2.includes('Move')) ||
-                                (example3.includes('vs.') && example3.includes('Move')) ||
-                                (example1.includes('Game ') || example2.includes('Game ') || example3.includes('Game '));
+        const fen = fenMatch ? fenMatch[1].trim() : '';
         
+        console.log(`   📍 Game Info: "${gameInfo}"`);
+        console.log(`   ❌ Mistake: "${mistake.substring(0, 100)}..."`);
+        console.log(`   ✅ Better Plan: "${betterPlan.substring(0, 100)}..."`);
+        console.log(`   ♟️ FEN: "${fen}"`);
+        
+        // ✅ UPDATED: Validate new format - must have GAME_INFO with "vs. opponent (Move X)"
+        const hasSpecificMoves = gameInfo.includes('vs.') && gameInfo.includes('Move');
         // ✅ ENHANCED: Smart validation - Check for specific chess concepts first
         const specificChessConcepts = [
           'Prophylactic', 'Minority Attack', 'Outpost', 'Backward Pawn', 'Isolated Pawn', 'Doubled Pawn',
@@ -2107,25 +2118,25 @@ Keep examples concise and actionable.
         // ✅ SMART VALIDATION: Accept if has specific chess concept, even if contains generic words
         const isValidTitle = hasSpecificChessConcept || !isPurelyGeneric;
         
-        // ✅ RELAXED: Check for chess terminology in examples (less strict)
-        const hasChessTerminology = [example1, example2, example3].some(example => {
-          const lowerExample = example.toLowerCase();
-          return lowerExample.includes('pawn') || lowerExample.includes('piece') || lowerExample.includes('square') ||
-          lowerExample.includes('file') || lowerExample.includes('rank') || lowerExample.includes('diagonal') ||
-          lowerExample.includes('center') || lowerExample.includes('flank') || lowerExample.includes('attack') ||
-          lowerExample.includes('defense') || lowerExample.includes('position') || lowerExample.includes('move') ||
-          lowerExample.includes('king') || lowerExample.includes('queen') || lowerExample.includes('rook') ||
-          lowerExample.includes('bishop') || lowerExample.includes('knight') || lowerExample.includes('castle') ||
-          lowerExample.includes('check') || lowerExample.includes('mate') || lowerExample.includes('capture') ||
-          lowerExample.includes('sacrifice') || lowerExample.includes('exchange') || lowerExample.includes('development') ||
-          lowerExample.includes('initiative') || lowerExample.includes('tempo') || lowerExample.includes('space') ||
-          lowerExample.includes('weakness') || lowerExample.includes('strength') || lowerExample.includes('control');
-        });
+        
+        // ✅ RELAXED: Check for chess terminology in mistake description
+        const lowerMistake = mistake.toLowerCase();
+        const hasChessTerminology = lowerMistake.includes('pawn') || lowerMistake.includes('piece') || lowerMistake.includes('square') ||
+          lowerMistake.includes('file') || lowerMistake.includes('rank') || lowerMistake.includes('diagonal') ||
+          lowerMistake.includes('center') || lowerMistake.includes('flank') || lowerMistake.includes('attack') ||
+          lowerMistake.includes('defense') || lowerMistake.includes('position') || lowerMistake.includes('move') ||
+          lowerMistake.includes('king') || lowerMistake.includes('queen') || lowerMistake.includes('rook') ||
+          lowerMistake.includes('bishop') || lowerMistake.includes('knight') || lowerMistake.includes('castle') ||
+          lowerMistake.includes('check') || lowerMistake.includes('mate') || lowerMistake.includes('capture') ||
+          lowerMistake.includes('sacrifice') || lowerMistake.includes('exchange') || lowerMistake.includes('development') ||
+          lowerMistake.includes('initiative') || lowerMistake.includes('tempo') || lowerMistake.includes('space') ||
+          lowerMistake.includes('weakness') || lowerMistake.includes('strength') || lowerMistake.includes('control');
         
         if (!hasSpecificMoves) {
-          console.log('❌ No specific moves found in examples - AI analysis failed');
-          throw new Error('AI failed to provide specific game analysis with 3 examples');
-        }
+          console.log('❌ No specific game info found - AI analysis failed');
+          console.log(`   Expected format: "vs. [opponent] (Move X)" but got: "${gameInfo}"`);
+          throw new Error('AI failed to provide specific game analysis with opponent and move number');
+         }
         
         if (!isValidTitle) {
           console.log('❌ Invalid title detected:', title);
@@ -2138,22 +2149,31 @@ Keep examples concise and actionable.
           console.log('❌ No chess terminology found in examples');
           throw new Error('AI failed to use chess terminology in analysis');
         }
+        if (!mistake || !betterPlan) {
+          console.log('❌ Missing mistake or better plan');
+          throw new Error('AI failed to provide complete weakness analysis');
+        }
+        
+        // ✅ NEW FORMAT: Store weakness with new structure
+         
         
         weaknesses.push({
           title,
           subtitle,
-          examples: [example1, example2, example3],
-          betterPlan
+          gameInfo,
+          mistake,
+          betterPlan,
+          fen: fen || null
         });
       }
       
       console.log('✅ Successfully parsed', weaknesses.length, 'weaknesses with specific moves');
       
       if (weaknesses.length === 0) {
-        console.log('⚠️ No weaknesses parsed, creating fallback analysis');
-        // ✅ FALLBACK: Create basic analysis from the raw response
-        const fallbackWeaknesses = createFallbackWeaknesses(analysisText);
-        return fallbackWeaknesses;
+        console.warn('⚠️ No weaknesses parsed from Gemini response - returning empty array');
+        console.warn('💡 This means Gemini did not identify any recurring weaknesses in the provided games');
+        // ✅ PRODUCTION: Return empty array - no fallback weaknesses
+        return [];
       }
       
       console.log('🎯 GAME DIVERSITY RESULTS:');
@@ -2177,100 +2197,19 @@ Keep examples concise and actionable.
       
     } catch (error) {
       console.error('❌ Error parsing weakness response:', error);
-      console.log('🔄 Attempting fallback weakness creation...');
+      console.warn('⚠️ Gemini weakness parsing failed - returning empty array');
+      console.warn('💡 Check Gemini response format or try regenerating the report');
       
-      // ✅ FALLBACK: Try to create basic weaknesses from raw text
-      try {
-        const fallbackWeaknesses = createFallbackWeaknesses(analysisText);
-        console.log('✅ Fallback weaknesses created:', fallbackWeaknesses.length);
-        return fallbackWeaknesses;
-      } catch (fallbackError) {
-        console.error('❌ Fallback also failed:', fallbackError);
-        throw new Error(`Analysis parsing failed: ${error.message}`);
-      }
+      // ✅ PRODUCTION: Return empty array on error - no fallback weaknesses
+      return [];
     }
   };
 
-  // ✅ FALLBACK: Create basic weaknesses when parsing fails
-  const createFallbackWeaknesses = (analysisText) => {
-    console.log('🔄 Creating fallback weaknesses from raw analysis...');
-    
-    const fallbackWeaknesses = [];
-    
-    // Try to extract any weakness-like content
-    const weaknessSections = analysisText.split(/\*\*WEAKNESS_\d+:/);
-    
-    for (let i = 1; i < Math.min(weaknessSections.length, 4); i++) {
-      const section = weaknessSections[i];
-      
-      // Extract title (more lenient)
-      const titleMatch = section.match(/^([^*\n]+)/);
-      const title = titleMatch ? titleMatch[1].trim() : `Positional Weakness ${i}`;
-      
-      // Extract subtitle (more lenient)
-      const subtitleMatch = section.match(/\*\*SUBTITLE:\*\*\s*([^\n*]+)/);
-      const subtitle = subtitleMatch ? subtitleMatch[1].trim() : 'Analysis of recurring positional patterns';
-      
-      // Extract examples (more lenient)
-      const exampleMatches = section.match(/\*\*EXAMPLE_\d+:\*\*\s*([^\n*]+)/g);
-      const examples = exampleMatches ? exampleMatches.map(match => 
-        match.replace(/\*\*EXAMPLE_\d+:\*\*\s*/, '').trim()
-      ) : [
-        'Game analysis shows recurring pattern',
-        'Multiple instances of similar mistakes',
-        'Consistent positional oversight'
-      ];
-      
-      // Extract better plan (more lenient)
-      const betterPlanMatch = section.match(/\*\*BETTER_PLAN:\*\*\s*([^\n*]+)/);
-      const betterPlan = betterPlanMatch ? betterPlanMatch[1].trim() : 'Focus on improving positional understanding';
-      
-      fallbackWeaknesses.push({
-        title: title,
-        subtitle: subtitle,
-        examples: examples.slice(0, 3), // Ensure we have exactly 3 examples
-        betterPlan: betterPlan
-      });
-    }
-    
-    // If no weaknesses found, create generic ones
-    if (fallbackWeaknesses.length === 0) {
-      fallbackWeaknesses.push(
-        {
-          title: 'Positional Pattern Recognition',
-          subtitle: 'Difficulty identifying key positional themes in complex positions',
-          examples: [
-            'Multiple games show similar positional oversights',
-            'Recurring patterns in piece placement decisions',
-            'Consistent challenges in position evaluation'
-          ],
-          betterPlan: 'Study classic positional games and focus on pattern recognition'
-        },
-        {
-          title: 'Strategic Planning Development',
-          subtitle: 'Need for improvement in long-term strategic thinking',
-          examples: [
-            'Games show tactical focus over strategic planning',
-            'Missed opportunities for positional improvements',
-            'Inconsistent follow-through on strategic ideas'
-          ],
-          betterPlan: 'Practice creating and executing long-term plans'
-        },
-        {
-          title: 'Position Evaluation Skills',
-          subtitle: 'Enhancement needed in accurate position assessment',
-          examples: [
-            'Evaluation errors in complex middlegame positions',
-            'Difficulty assessing piece activity correctly',
-            'Challenges in identifying critical moments'
-          ],
-          betterPlan: 'Work on systematic position evaluation methods'
-        }
-      );
-    }
-    
-    console.log(`✅ Created ${fallbackWeaknesses.length} fallback weaknesses`);
-    return fallbackWeaknesses;
+  // ✅ PRODUCTION: Fallback weaknesses removed - we only use Gemini-generated weaknesses
+  // This function is deprecated and should not be called
+  const createFallbackWeaknesses_DEPRECATED = (analysisText) => {
+    console.warn('⚠️ createFallbackWeaknesses called but is deprecated - returning empty array');
+    return [];
   };
 
   // If loading, show the full-screen loading component
@@ -4993,12 +4932,21 @@ const parseWeaknessesFromUnified = (weaknessesText) => {
   for (let i = 1; i < weaknessBlocks.length && i <= 3; i++) {
     const block = weaknessBlocks[i].trim();
     
-    // Extract components
-    const titleMatch = block.match(/^([^*]+)/);
-    const subtitleMatch = block.match(/\*\*SUBTITLE:\*\*\s*([^\n*]+)/);
-    const gameInfoMatch = block.match(/\*\*GAME_INFO:\*\*\s*([^\n*]+)/);
-    const mistakeMatch = block.match(/\*\*MISTAKE:\*\*\s*([^\n*]+)/);
-    const betterPlanMatch = block.match(/\*\*BETTER_PLAN:\*\*\s*([^\n*]+)/);
+    // Extract components - FIXED: Capture multi-line content properly
+    const titleMatch = block.match(/^([^*\n]+)/);
+    const subtitleMatch = block.match(/\*\*SUBTITLE:\*\*\s*([^\n]+(?:\n(?!\*\*)[^\n]+)*)/);
+    const gameInfoMatch = block.match(/\*\*GAME_INFO:\*\*\s*([^\n]+)/);
+    // Match everything after MISTAKE until the next ** marker or FEN
+    const mistakeMatch = block.match(/\*\*MISTAKE:\*\*\s*([\s\S]*?)(?=\n\*\*BETTER_PLAN|\n\*\*FEN|\n\*\*WEAKNESS|$)/);
+    // Match everything after BETTER_PLAN until FEN or next weakness
+    const betterPlanMatch = block.match(/\*\*BETTER_PLAN:\*\*\s*([\s\S]*?)(?=\nFEN:|\n\*\*WEAKNESS|$)/);
+    const fenMatch = block.match(/FEN:\s*([^\n]+)/);
+    
+    console.log(`🔍 Parsing unified weakness ${i}:`);
+    console.log(`   Title: "${titleMatch ? titleMatch[1].trim() : 'N/A'}"`);
+    console.log(`   Game Info: "${gameInfoMatch ? gameInfoMatch[1].trim() : 'N/A'}"`);
+    console.log(`   Mistake length: ${mistakeMatch ? mistakeMatch[1].trim().length : 0} chars`);
+    console.log(`   Better Plan length: ${betterPlanMatch ? betterPlanMatch[1].trim().length : 0} chars`);
     
     weaknesses.push({
       title: titleMatch ? titleMatch[1].trim() : `Weakness ${i}`,
@@ -5006,7 +4954,7 @@ const parseWeaknessesFromUnified = (weaknessesText) => {
       gameInfo: gameInfoMatch ? gameInfoMatch[1].trim() : '',
       mistake: mistakeMatch ? mistakeMatch[1].trim() : '',
       betterPlan: betterPlanMatch ? betterPlanMatch[1].trim() : '',
-      examples: [mistakeMatch ? mistakeMatch[1].trim() : '']
+      fen: fenMatch ? fenMatch[1].trim() : null
     });
   }
   
@@ -5029,6 +4977,12 @@ const parseWeaknessesFromUnified = (weaknessesText) => {
       }
     }
   });
+  
+  console.log(`✅ Parsed ${weaknesses.length} weaknesses from unified response`);
+  console.log(`   Unique opponents: ${usedOpponents.size}`);
+  if (duplicateGameIndices.length > 0) {
+    console.warn(`⚠️ Found duplicate games at indices: [${duplicateGameIndices.join(', ')}]`);
+  }
   
   return weaknesses;
 };
@@ -5222,5 +5176,284 @@ const callGeminiForRecurringWeaknesses = async (prompt, preparedFenData) => {
     throw error;
   }
 };
+
+
+// ========================================
+// 🆕 PAWNSPOSES AI COMPLETE ANALYSIS
+// ========================================
+
+/**
+ * Prepare games data with FEN + moves for Pawnsposes AI analysis
+ */
+const prepareGamesForPawnsposesAI = (games, fenData, formData) => {
+  console.log('🎯 Preparing games for Pawnsposes AI analysis...');
+  
+  return games.map((game, index) => {
+    const gameNumber = index + 1;
+    const fenPositions = fenData[index]?.fenPositions || [];
+    
+    // Extract game metadata
+    let gameInfo = {};
+    if (formData.platform === 'chess.com') {
+      gameInfo = {
+        white: game.white?.username || 'Unknown',
+        black: game.black?.username || 'Unknown',
+        whiteRating: game.white?.rating || 0,
+        blackRating: game.black?.rating || 0,
+        result: game.white?.result === 'win' ? '1-0' : 
+                game.black?.result === 'win' ? '0-1' : 
+                game.white?.result === 'draw' ? '1/2-1/2' : 'Unknown',
+        eco: game.eco || 'Unknown',
+        timeControl: game.time_control || 'Unknown',
+        url: game.url || ''
+      };
+    } else if (formData.platform === 'lichess') {
+      gameInfo = {
+        white: game.players?.white?.user?.name || 'Unknown',
+        black: game.players?.black?.user?.name || 'Unknown',
+        whiteRating: game.players?.white?.rating || 0,
+        blackRating: game.players?.black?.rating || 0,
+        result: game.winner === 'white' ? '1-0' : 
+                game.winner === 'black' ? '0-1' : 
+                !game.winner ? '1/2-1/2' : 'Unknown',
+        eco: game.opening?.eco || 'Unknown',
+        timeControl: game.speed || 'Unknown',
+        url: game.url || ''
+      };
+    }
+
+    // Determine user's color
+    const isUserWhite = gameInfo.white === formData.username;
+    const userColor = isUserWhite ? 'white' : 'black';
+    const opponent = isUserWhite ? gameInfo.black : gameInfo.white;
+
+    // Build moves list with FEN positions
+    const movesWithFen = fenPositions.map(pos => ({
+      moveNumber: pos.moveNumber,
+      move: pos.move,
+      fen: pos.fen
+    }));
+
+    return {
+      gameNumber,
+      white: gameInfo.white,
+      black: gameInfo.black,
+      whiteRating: gameInfo.whiteRating,
+      blackRating: gameInfo.blackRating,
+      result: gameInfo.result,
+      eco: gameInfo.eco,
+      timeControl: gameInfo.timeControl,
+      url: gameInfo.url,
+      userColor,
+      opponent,
+      moves: movesWithFen
+    };
+  });
+};
+
+/**
+ * Create the Pawnsposes AI prompt
+ */
+const createPawnsposesAIPrompt = (gamesData, formData) => {
+  const username = formData.username;
+  const gamesText = gamesData.map(game => {
+    const movesText = game.moves.map(m => 
+      `Move ${m.moveNumber}: ${m.move} (FEN: ${m.fen})`
+    ).join('\n');
+    
+    return `
+**GAME ${game.gameNumber}**
+White: ${game.white} (${game.whiteRating})
+Black: ${game.black} (${game.blackRating})
+Result: ${game.result}
+ECO: ${game.eco}
+Time Control: ${game.timeControl}
+User Color: ${game.userColor}
+Opponent: ${game.opponent}
+
+Moves:
+${movesText}
+`;
+  }).join('\n\n---\n\n');
+
+  return `You are "Pawnsposes," a world-renowned chess Grandmaster (FIDE 2650+) and elite coach. Your analysis is famous for being insightful, practical, and deeply psychological. You don't just point out tactical mistakes; you uncover the flawed thinking and recurring habits that hold players back. Your tone is encouraging but direct.
+
+**USER PROMPT**
+Analyze the games of the user '${username}'. The games are provided below with FEN positions and moves.
+
+**GAMES DATA:**
+${gamesText}
+
+**ANALYSIS STRUCTURE:**
+
+Return your analysis in the following JSON format:
+
+{
+  "executiveSummary": "A brief, encouraging but blunt paragraph summarizing the player's overall style and the key theme of this report.",
+  
+  "recurringWeaknesses": [
+    {
+      "title": "Sophisticated, high-level title that captures the psychological or strategic essence (e.g., 'Impulsive Pawn Pushes That Weaken King Safety', 'Critical Lapses in Tactical Vision Under Pressure', 'Premature Piece Commitments Before Completing Development', 'Neglecting Prophylactic Thinking in Critical Moments', 'Overextending in Pursuit of Illusory Attacks')",
+      "explanation": "Detailed explanation of why this is a weakness, explaining the long-term positional or strategic consequences.",
+      "examples": [
+        {
+          "gameNumber": 1,
+          "moveNumber": 15,
+          "move": "15...g5?",
+          "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+          "whyMistake": "Explanation of why this move was a strategic mistake in this specific position.",
+          "betterPlan": "Suggest the superior plan and explain the future idea (e.g., 'Exchange the bishop to permanently weaken dark squares')"
+        }
+      ]
+    }
+  ],
+  
+  "middlegameMastery": {
+    "analysis": "Analyze the player's typical middlegame plans. Are they coherent? Do they correctly identify which side of the board to play on?",
+    "keyConceptToStudy": "One key middlegame concept they need to study (e.g., 'Outposts and Weak Squares', 'Pawn Breaks and Tension', 'Trading Good vs Bad Pieces', etc.)"
+  },
+  
+  "endgameTechnique": {
+    "assessment": "Assess the player's technique in the endgame phases. Are they confident in converting advantages? Do they defend well in difficult endgames?",
+    "skillToPractice": "One specific endgame skill to practice (e.g., 'Rook and Pawn Endgames', 'Calculating King Activity', 'The Principle of Two Weaknesses')"
+  },
+  
+  "improvementPlan": {
+    "threeStepChecklist": [
+      "Step 1: Concrete action for next 10 games",
+      "Step 2: Concrete action for next 10 games",
+      "Step 3: Concrete action for next 10 games"
+    ],
+    "youtubeVideo": {
+      "title": "Exact video title",
+      "creator": "Channel name"
+    },
+    "masterGame": "Classic master game that illustrates a concept they need to learn (e.g., 'Kasparov vs Karpov, 1985 - Weak Square Exploitation')"
+  }
+}
+
+**CRITICAL STYLE REQUIREMENTS:**\n- Use sophisticated, high-level chess language throughout\n- Frame weaknesses as psychological/strategic patterns, not generic labels\n- Focus on thought process failures and decision-making patterns\n- Avoid simplistic titles like "Tactical Mistakes" or "Pawn Structure Issues"\n- Instead use descriptive, specific titles that capture the essence of the problem\n\n**IMPORTANT REQUIREMENTS:**
+1. Provide exactly 3 recurring weaknesses
+2. Each weakness must have 3 concrete examples from DIFFERENT games
+3. Examples must be STRATEGIC mistakes, not tactical blunders
+4. Focus on positional chess concepts that players above 1300-2600 struggle with
+5. Concepts to consider: outposts/weak squares, pawn breaks/pawn tension, trading good vs bad pieces, exchange sacrifices, counterattack, static and dynamic weaknesses, blockade or restriction, space advantage, minority attacks, isolated queen pawn, passed pawns, position evaluation, improving pieces, candidate moves, deep tactical visualization (3-4 moves)
+6. Return ONLY valid JSON, no additional text
+
+Begin your analysis now.`;
+};
+
+/**
+ * Call Gemini API with Pawnsposes AI prompt
+ */
+const callPawnsposesAI = async (gamesData, formData) => {
+  console.log('🤖 Calling Pawnsposes AI (Gemini)...');
+  
+  const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+  
+  if (!apiKey) {
+    throw new Error('Gemini API key not configured');
+  }
+
+  const model = 'gemini-2.0-flash-exp';
+  const prompt = createPawnsposesAIPrompt(gamesData, formData);
+  
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: prompt
+            }]
+          }],
+          generationConfig: {
+            temperature: 0.7,
+            topK: 40,
+            topP: 0.95,
+            maxOutputTokens: 8192, // Increased for comprehensive analysis
+          }
+        })
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
+    }
+
+    const result = await response.json();
+    
+    if (!result.candidates || !result.candidates[0] || !result.candidates[0].content) {
+      throw new Error('Invalid response structure from Gemini API');
+    }
+
+    const analysisText = result.candidates[0].content.parts[0].text;
+    console.log('📝 Raw Pawnsposes AI response:', analysisText.substring(0, 500) + '...');
+    
+    // Parse JSON response
+    try {
+      // Extract JSON from response (handle markdown code blocks)
+      let jsonText = analysisText;
+      const jsonMatch = analysisText.match(/```json\s*([\s\S]*?)\s*```/) || 
+                       analysisText.match(/```\s*([\s\S]*?)\s*```/) ||
+                       analysisText.match(/\{[\s\S]*\}/);
+      
+      if (jsonMatch) {
+        jsonText = jsonMatch[1] || jsonMatch[0];
+      }
+      
+      const jsonResult = JSON.parse(jsonText);
+      
+      // Validate structure
+      if (!jsonResult.executiveSummary || !jsonResult.recurringWeaknesses || !Array.isArray(jsonResult.recurringWeaknesses)) {
+        throw new Error('Invalid JSON structure from Pawnsposes AI');
+      }
+      
+      console.log('✅ Pawnsposes AI analysis parsed successfully');
+      console.log('📊 Found', jsonResult.recurringWeaknesses.length, 'recurring weaknesses');
+      
+      return jsonResult;
+      
+    } catch (parseError) {
+      console.error('❌ Failed to parse Pawnsposes AI JSON response:', parseError);
+      console.error('Raw response:', analysisText);
+      throw new Error('Failed to parse JSON response from Pawnsposes AI: ' + parseError.message);
+    }
+    
+  } catch (error) {
+    console.error('❌ Error calling Pawnsposes AI:', error);
+    throw error;
+  }
+};
+
+/**
+ * Main function to perform Pawnsposes AI analysis
+ */
+const performPawnsposesAIAnalysis = async (games, fenData, formData) => {
+  console.log('🚀 Starting Pawnsposes AI Complete Analysis...');
+  
+  try {
+    // Prepare games data
+    const gamesData = prepareGamesForPawnsposesAI(games, fenData, formData);
+    console.log('✅ Prepared', gamesData.length, 'games for analysis');
+    
+    // Call Pawnsposes AI
+    const analysis = await callPawnsposesAI(gamesData, formData);
+    
+    console.log('✅ Pawnsposes AI analysis completed successfully');
+    return analysis;
+    
+  } catch (error) {
+    console.error('❌ Pawnsposes AI analysis failed:', error);
+    throw error;
+  }
+};
+
 
 export default Reports;

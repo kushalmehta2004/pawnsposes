@@ -1,0 +1,62 @@
+// ✅ Helper: Parse weaknesses from unified response
+const parseWeaknessesFromUnified = (weaknessesText) => {
+  const weaknesses = [];
+  const weaknessBlocks = weaknessesText.split(/\*\*WEAKNESS_\d+:/);
+  
+  for (let i = 1; i < weaknessBlocks.length && i <= 3; i++) {
+    const block = weaknessBlocks[i].trim();
+    
+    // Extract components - FIXED: Capture multi-line content properly
+    const titleMatch = block.match(/^([^*\n]+)/);
+    const subtitleMatch = block.match(/\*\*SUBTITLE:\*\*\s*([^\n]+(?:\n(?!\*\*)[^\n]+)*)/);
+    const gameInfoMatch = block.match(/\*\*GAME_INFO:\*\*\s*([^\n]+)/);
+    // Match everything after MISTAKE until the next ** marker or FEN
+    const mistakeMatch = block.match(/\*\*MISTAKE:\*\*\s*([\s\S]*?)(?=\n\*\*BETTER_PLAN|\n\*\*FEN|\n\*\*WEAKNESS|$)/);
+    // Match everything after BETTER_PLAN until FEN or next weakness
+    const betterPlanMatch = block.match(/\*\*BETTER_PLAN:\*\*\s*([\s\S]*?)(?=\nFEN:|\n\*\*WEAKNESS|$)/);
+    const fenMatch = block.match(/FEN:\s*([^\n]+)/);
+    
+    console.log(`🔍 Parsing unified weakness ${i}:`);
+    console.log(`   Title: "${titleMatch ? titleMatch[1].trim() : 'N/A'}"`);
+    console.log(`   Game Info: "${gameInfoMatch ? gameInfoMatch[1].trim() : 'N/A'}"`);
+    console.log(`   Mistake length: ${mistakeMatch ? mistakeMatch[1].trim().length : 0} chars`);
+    console.log(`   Better Plan length: ${betterPlanMatch ? betterPlanMatch[1].trim().length : 0} chars`);
+    
+    weaknesses.push({
+      title: titleMatch ? titleMatch[1].trim() : `Weakness ${i}`,
+      subtitle: subtitleMatch ? subtitleMatch[1].trim() : '',
+      gameInfo: gameInfoMatch ? gameInfoMatch[1].trim() : '',
+      mistake: mistakeMatch ? mistakeMatch[1].trim() : '',
+      betterPlan: betterPlanMatch ? betterPlanMatch[1].trim() : '',
+      fen: fenMatch ? fenMatch[1].trim() : null
+    });
+  }
+  
+  // ✅ POST-PROCESSING: Ensure game diversity (no duplicate games across weaknesses)
+  const usedOpponents = new Set();
+  const duplicateGameIndices = [];
+  
+  // Check for duplicate opponents/games
+  weaknesses.forEach((weakness, index) => {
+    if (weakness.gameInfo) {
+      // Extract opponent name from gameInfo (format: "vs. OpponentName (Move X)")
+      const opponentMatch = weakness.gameInfo.match(/vs\.\s*([^(]+)/);
+      if (opponentMatch) {
+        const opponent = opponentMatch[1].trim();
+        if (usedOpponents.has(opponent)) {
+          duplicateGameIndices.push(index);
+        } else {
+          usedOpponents.add(opponent);
+        }
+      }
+    }
+  });
+  
+  console.log(`✅ Parsed ${weaknesses.length} weaknesses from unified response`);
+  console.log(`   Unique opponents: ${usedOpponents.size}`);
+  if (duplicateGameIndices.length > 0) {
+    console.warn(`⚠️ Found duplicate games at indices: [${duplicateGameIndices.join(', ')}]`);
+  }
+  
+  return weaknesses;
+};

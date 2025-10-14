@@ -424,81 +424,13 @@ const ReportDisplay = () => {
       setPerformanceMetrics(finalMetrics);
             // Update in-memory cache for fast return navigation
       REPORT_DISPLAY_CACHE = { ...REPORT_DISPLAY_CACHE, key: username || REPORT_DISPLAY_CACHE.key || 'unknown', performanceMetrics: finalMetrics };
-      // ✅ UNIFIED: Use pre-calculated weaknesses from single Gemini call
+      // ✅ UNIFIED: Use pre-calculated weaknesses from Pawnsposes AI only
       setIsCalculatingMetrics(false);
       
-      // Only build dynamic recurring weaknesses if we don't already have them
-      if (!recurringWeaknesses || recurringWeaknesses.length === 0) {
-        try {
-          setIsAnalyzingWeaknesses(true);
-        const playerInfo = {
-            username,
-            platform: analysisData.platform || analysisData.rawAnalysis?.platform || 'unknown',
-            averageRating: analysisData.averageRating || analysisData.rawAnalysis?.averageRating,
-            skillLevel: analysisData.skillLevel || analysisData.rawAnalysis?.skillLevel
-          };
-          let rw = [];
-         try {
-            const { generateFullReportSectionsFromGames } = await import('../utils/geminiStockfishAnalysis');
-            const sections = await generateFullReportSectionsFromGames(playerInfo, { totalGames: games.length }, { maxGames: 25 });
-            rw = Array.isArray(sections?.recurringWeaknesses) ? sections.recurringWeaknesses : [];
-          } catch (e) {
-            console.warn('⚠️ Gemini recurring weaknesses generation failed (fallback to existing):', e?.message || e);
-          }
-
-        // Fallback to any precomputed weaknesses on analysisData if Gemini not available
-          const stockfishAnalysis = analysisData.stockfishAnalysis;
-          const deepAnalysisWeaknesses = stockfishAnalysis?.recurringWeaknesses || [];
-          const unifiedWeaknesses = analysisData.recurringWeaknesses || [];
-          // Enrich weaknesses with opponent info so FullReport can always render "vs. Opponent"
-          const gamesArr = games;
-          const safeStr = (v) => (v || '').toString();
-          const getNames = (g) => {
-            const white = g?.white?.username || g?.players?.white?.user?.name || g?.gameInfo?.white || (typeof g?.white === 'string' ? g.white : g?.white?.name);
-            const black = g?.black?.username || g?.players?.black?.user?.name || g?.gameInfo?.black || (typeof g?.black === 'string' ? g.black : g?.black?.name);
-            return { white, black };
-          };
-          const deriveOpponentFromGame = (g, username) => {
-            const { white, black } = getNames(g);
-            const u = safeStr(username).toLowerCase();
-            const w = safeStr(white).toLowerCase();
-            const b = safeStr(black).toLowerCase();
-            if (u && w && u === w) return black || g?.opponent || null;
-            if (u && b && u === b) return white || g?.opponent || null;
-            return g?.opponent || null;
-          };
-          const attachOpponents = (weaknesses) => Array.isArray(weaknesses)
-            ? weaknesses.map(w => {
-                const exs = Array.isArray(w.examples)
-                  ? w.examples.map(ex => {
-                      const gn = Number(ex?.gameNumber);
-                      let g = null;
-                      if (Number.isFinite(gn)) {
-                        g = gamesArr.find(gm => Number(gm?.gameNumber) === gn) || gamesArr[gn - 1] || null;
-                      }
-                      const opp = g ? deriveOpponentFromGame(g, username) : null;
-                      return { ...ex, opponent: ex?.opponent || opp || undefined };
-                    })
-                  : w.examples;
-                let opponentContext = w.opponentContext;
-                if (!opponentContext && Array.isArray(exs) && exs[0]?.opponent && exs[0]?.moveNumber) {
-                  opponentContext = `vs. ${exs[0].opponent} (Move ${exs[0].moveNumber})`;
-                }
-                return { ...w, examples: exs, opponentContext };
-              })
-            : weaknesses;
-
-          const baseWeaknesses = rw.length > 0 ? rw : (deepAnalysisWeaknesses.length > 0 ? deepAnalysisWeaknesses : unifiedWeaknesses);
-          const enrichedWeaknesses = attachOpponents(baseWeaknesses);
-          setRecurringWeaknesses(enrichedWeaknesses);
-          REPORT_DISPLAY_CACHE = { ...REPORT_DISPLAY_CACHE, recurringWeaknesses: enrichedWeaknesses };
-        } finally {
-          setIsAnalyzingWeaknesses(false);
-        }
-      }
+      // ✅ REMOVED: Old fallback weakness calculation
+      // All weaknesses now come from Pawnsposes AI analysis (pawnsposesAI.recurringWeaknesses)
+      // No fallback calculation needed - if Pawnsposes AI fails, we show a message to the user
       
-      // No need to set analyzing state since data is already available
-      // console.log('✅ Weakness data ready - button enabled immediately');  // DISABLED - Noise reduction
       
       return finalMetrics;
       
@@ -1863,38 +1795,11 @@ ANALYZE THE FEN POSITIONS CAREFULLY AND FIND REAL CHESS MISTAKES!`;
         weaknesses.push(weakness);
       });
       
-      // If we still have no weaknesses, create fallback ones
+      // ✅ PRODUCTION: No fallback weaknesses - return empty array if Gemini fails
+      // This ensures we never show generic/inaccurate weaknesses
       if (weaknesses.length === 0) {
-        // console.log('🔍 No weaknesses parsed, creating fallback analysis...');  // DISABLED - Noise reduction
-        
-        const fallbackWeaknesses = [
-          {
-            title: 'Position Evaluation',
-            subtitle: 'Difficulty in accurately assessing positions',
-            gameInfo: 'Pattern observed across multiple games',
-            mistake: 'Based on the analysis of your games, there appears to be room for improvement in position evaluation and strategic planning.',
-            betterPlan: 'Focus on studying typical pawn structures and piece placement principles',
-            examples: ['Work on understanding when positions favor tactical vs positional play']
-          },
-          {
-            title: 'Move Selection',
-            subtitle: 'Suboptimal move choices in critical moments',
-            gameInfo: 'Recurring pattern in analyzed games',
-            mistake: 'Some moves could be improved by considering more candidate moves before deciding.',
-            betterPlan: 'Practice the candidate move method: identify 3-4 possible moves before choosing',
-            examples: ['Take more time to calculate variations in complex positions']
-          },
-          {
-            title: 'Strategic Planning',
-            subtitle: 'Long-term planning and piece coordination',
-            gameInfo: 'General improvement area',
-            mistake: 'Strategic understanding can be enhanced through focused study.',
-            betterPlan: 'Study master games in your preferred openings to understand typical plans',
-            examples: ['Focus on improving piece coordination and creating long-term plans']
-          }
-        ];
-        
-        return fallbackWeaknesses.slice(0, 3);
+        console.warn('⚠️ No weaknesses parsed from Gemini response - returning empty array');
+        return [];
       }
       
       return weaknesses.slice(0, 3);
@@ -1902,17 +1807,9 @@ ANALYZE THE FEN POSITIONS CAREFULLY AND FIND REAL CHESS MISTAKES!`;
     } catch (error) {
 
       
-      // Return basic fallback weaknesses
-      return [
-        {
-          title: 'Chess Analysis',
-          subtitle: 'Areas for improvement identified',
-          gameInfo: 'Based on game analysis',
-          mistake: 'Continue working on your chess skills through practice and study.',
-          betterPlan: 'Focus on tactical training and positional understanding',
-          examples: ['Regular practice and analysis will help improve your play']
-        }
-      ];
+      console.error('❌ Error parsing weaknesses:', error);
+      // ✅ PRODUCTION: Return empty array on error - no fallback weaknesses
+      return [];
     }
   };
 
@@ -3555,7 +3452,7 @@ Guidelines:
             
             {/* Dynamic AI Diagnosis */}
             <div className="diagnosis-item">
-              <h4>Recurring Weakness:</h4>
+              <h4>Primary Weakness:</h4>
               <p>
                 {recurringWeaknesses && recurringWeaknesses.length > 0 
                   ? recurringWeaknesses[0].title || "Analysis in progress..."

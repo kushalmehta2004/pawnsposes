@@ -1427,21 +1427,27 @@ export const generateReportFromGeminiFullGames = async (playerInfo, gameContext,
         replay.reset();
         for (const m of h2) replay.move(m, { sloppy: true });
       }
-      // Now traverse again from start to collect SAN and FEN after each user move
+      // Now traverse again from start to collect SAN and FEN before/after each move
       const traversal = new Chess();
       const history = replay.history({ verbose: true });
       const entries = [];
       let fullmove = 1;
+      let ply = 1;
       for (const mv of history) {
         const color = mv.color === 'w' ? 'white' : 'black';
+        const fenBefore = traversal.fen();
         traversal.move(mv, { sloppy: true });
+        const fenAfter = traversal.fen();
         entries.push({
           color,
           fullmove,
+          ply,
           san: mv.san,
-          fenAfter: traversal.fen(),
+          fenBefore,
+          fenAfter,
         });
         if (color === 'black') fullmove += 1; // fullmove increments after black
+        ply += 1;
       }
       index.set(cg.gameNumber, {
         playerColor: cg.playerColor,
@@ -1454,16 +1460,32 @@ export const generateReportFromGeminiFullGames = async (playerInfo, gameContext,
 
   const gameIndex = buildGameIndex();
 
+  // Attach detailed move snapshots with FEN data to each compact game for Gemini grounding
+  compactGames.forEach((game) => {
+    const info = gameIndex.get(game.gameNumber);
+    if (info && Array.isArray(info.entries)) {
+      game.playerColor = game.playerColor || info.playerColor;
+      game.movesWithFen = info.entries.map((entry) => ({
+        color: entry.color,
+        moveNumber: entry.fullmove,
+        ply: entry.ply,
+        san: entry.san,
+        fenBefore: entry.fenBefore,
+        fenAfter: entry.fenAfter,
+      }));
+    }
+  });
+
   // 3) Compose strict JSON-only prompt modeled after prompt.txt
   const safeName = username || 'Player';
   const skill = skillLevel || 'Unknown';
   const ratingText = averageRating ? ` (~${averageRating})` : '';
 
-  const prompt = `You are \"Pawnsposes,\" a world-renowned chess Grandmaster (FIDE 2650+) and elite coach.\n` +
-`Your analysis is insightful, practical, and psychological. Base ALL conclusions ONLY on the provided JSON data. Do not invent moves or positions.\n` +
-`Your examples will be validated against the user's actual games; incorrect examples will be discarded.\n\n` +
+  const prompt = `Give me analysis like Pawnsposes AI for these games.\n\n` +
+`You are \"Pawnsposes,\" a world-renowned chess Grandmaster (FIDE 2650+) and elite coach. Your analysis is insightful, practical, and deeply psychological. You uncover flawed thinking patterns behind positional mistakes and help players build resilient plans.\n` +
+`Base every conclusion ONLY on the provided JSON payload. It contains full PGNs plus per-move FEN snapshots in \\\"movesWithFen\\\" (fenBefore/fenAfter). Do not fabricate moves, evaluations, or outcomes.\n\n` +
 `USER CONTEXT: ${safeName} on ${platform || 'unknown'}${ratingText}, Skill: ${skill}.\n\n` +
-`ANALYSIS TASK: Return ONLY valid JSON (no Markdown). Use this schema exactly and fill all fields.\n` +
+`OUTPUT REQUIREMENTS: Return STRICT JSON only (no Markdown, no commentary) using this schema:\n` +
 `{\n` +
 `  \"recurringWeaknesses\": [\n` +
 `    {\n` +
@@ -1473,11 +1495,11 @@ export const generateReportFromGeminiFullGames = async (playerInfo, gameContext,
 `        {\n` +
 `          \"gameNumber\": number,\n` +
 `          \"moveNumber\": number,\n` +
-`          \"played\": string,        // e.g., 15...g5?\n` +
+`          \"played\": string,\n` +
 `          \"fen\": string,\n` +
-`          \"justification\": string, // brief reason why it was wrong\n` +
-`          \"betterPlan\": string,    // concise plan and a better move suggestion\n` +
-`          \"betterMove\": string     // e.g., 15...Re8!\n` +
+`          \"justification\": string,\n` +
+`          \"betterPlan\": string,\n` +
+`          \"betterMove\": string\n` +
 `        }\n` +
 `      ]\n` +
 `    }\n` +
@@ -1485,22 +1507,40 @@ export const generateReportFromGeminiFullGames = async (playerInfo, gameContext,
 `  \"engineInsights\": string,\n` +
 `  \"improvementRecommendations\": string\n` +
 `}\n\n` +
-`CRITICAL REQUIREMENTS FOR GAME DIVERSITY:\n` +
-`- You MUST use examples from DIFFERENT games for each weakness.\n` +
-`- Weakness 1 should use examples from games A, B, C\n` +
-`- Weakness 2 should use examples from games D, E, F (NOT A, B, or C)\n` +
-`- Weakness 3 should use examples from games G, H, I (NOT A, B, C, D, E, or F)\n` +
-`- If you don't have enough games, use fewer examples per weakness rather than repeating games.\n` +
-`- NEVER use the same gameNumber for examples in different weaknesses.\n\n` +
-`Guidelines:\n` +
-`- Produce exactly 3 recurringWeaknesses.\n` +
-`- All example moves must be from move 16 or later (moveNumber >= 16). Prefer mid/late-game moments typical for ~1800 level play.\n` +
-`- CRITICAL: All examples must show moves played by ${safeName} (the user), NOT the opponent. Focus on the user's mistakes or suboptimal decisions.\n` +
-`- For each weakness, provide 2-3 examples from different games when possible.\n` +
-`- Use only the provided data (games, moves, FENs if present). If FEN is missing, you may omit it in examples or derive from move context if clearly possible.\n` +
-`- Keep justifications and better plans concise and practical.\n` +
-`- No extra prose outside JSON.\n\n` +
-`GAMES JSON:\n` + JSON.stringify(compactGames);
+`ANALYSIS STRUCTURE:\n` +
+`- Provide EXACTLY 3 recurringWeaknesses. Titles must be conceptual and descriptive (e.g., outposts/weak squares, pawn breaks & pawn tension, trading good vs. bad pieces, exchange sacrifices, counter-attacking instincts, static vs. dynamic evaluation, space advantage handling, minority attacks, isolated queen pawn play, passed pawn conversion, evaluating critical positions, improving worst-placed piece, candidate-move generation & 3-4 move visualization).\n` +
+`- Each weakness needs a detailed explanation of WHY it recurs, highlighting strategic/psychological habits rather than tactical blunders.\n` +
+`- For every weakness, include 1 example. All examples must be strategic (no simple piece blunders) and reference the user's move at moveNumber >= 16.\n` +
+`- Use moves played by ${safeName} only. Validate SAN and FEN via movesWithFen before outputting.\n` +
+`- Pull the fenAfter for the user's move when available; otherwise use fenBefore. Always supply a FEN string.\n` +
+`- Each example must include: gameNumber, moveNumber, the SAN move played, a concise justification of the strategic error, a betterPlan describing the correct plan, and a single betterMove suggestion (SAN).\n` +
+`- Strict game diversity: do not reuse a gameNumber across different weaknesses. If there are insufficient games, reduce the number of examples instead.\n\n` +
+`ENGINE INSIGHTS:\n` +
+`- Summarize how the user's evaluations shift across middlegame/endgame phases, their calculation depth, and whether their problems arise in tactical or positional settings. Reference recurring themes you saw in the games.\n\n` +
+`IMPROVEMENT RECOMMENDATIONS:\n` +
+`- Deliver concrete training advice (study plans, exercises, model games) tailored to the identified weaknesses. Keep it actionable, encouraging, and professional.\n\n` +
+`STYLE CONSTRAINTS:\n` +
+`- Tone: encouraging but direct, professional coach addressing a 1300-2600 audience.\n` +
+`- Stay concise. No bullet markers beyond the JSON structure. No extra prose outside the JSON object.\n\n` +
+`GAMES JSON:\n
+**CRITICAL LANGUAGE REQUIREMENTS:**
+1. Use SOPHISTICATED, HIGH-LEVEL chess terminology throughout
+2. Weakness titles must be DESCRIPTIVE and capture the PSYCHOLOGICAL/STRATEGIC essence
+3. Examples: "Impulsive Pawn Pushes That Weaken King Safety", "Critical Lapses in Tactical Vision Under Pressure", "Premature Commitments Before Securing Central Control", "Neglecting Prophylactic Measures in Sharp Positions"
+4. Avoid generic titles like "Pawn Structure Issues" or "Bad Piece Placement"
+5. Use advanced concepts: prophylaxis, zugzwang, weak color complexes, pawn tension, piece coordination, strategic imbalances, space advantage conversion, blockade strategy, minority attacks, etc.
+6. Write explanations that reveal DEEP UNDERSTANDING of positional chess
+7. Focus on the THOUGHT PROCESS failure, not just the move itself
+
+**CONTENT REQUIREMENTS:**
+1. Provide exactly 3 recurring weaknesses
+2. Each weakness must have 1 concrete example from DIFFERENT games
+3. Examples must be STRATEGIC mistakes, not simple tactical blunders
+4. Focus on positional chess concepts that players rated 2000-2600 struggle with
+5. Concepts to emphasize: weak squares/outposts, prophylactic thinking, pawn breaks and tension, piece coordination, space advantage, minority attacks, color complex weaknesses, converting advantages, defensive resources, king safety in complex positions
+6. Return ONLY valid JSON, no additional text
+
+Begin your analysis now.` + JSON.stringify(compactGames);
 
   // 4) Call Gemini
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`, {
