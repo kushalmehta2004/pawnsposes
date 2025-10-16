@@ -124,7 +124,9 @@
   color: #EAEAEA !important;
 }
 /* Keep the board container subtle; squares will carry colors */
-.dark-mode .chessboard-container { background-color: transparent !important; }
+.dark-mode .chessboard-container { 
+  background-color: transparent !important; 
+}
 /* Keep chessboard squares exactly like light mode on puzzle pages */
 /* No dark-mode overrides for .chessboard-square colors to preserve inline styles */
 
@@ -270,4 +272,79 @@
 .dark-mode .bg-green-600:hover,
 .dark-mode .hover\:bg-green-700:hover {
   background-color: #15803D !important;
+}
+
+/* Position Viewer Modal - Dark Mode (Beautiful & Modern) */
+.dark-mode .position-modal-overlay {
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.9) 0%, rgba(20, 20, 30, 0.95) 100%) !important;
+  backdrop-filter: blur(8px) !important;
+}
+
+.dark-mode .position-modal-content {
+  background: linear-gradient(145deg, #2D2D32 0%, #25252A 100%) !important;
+  border: 1px solid #404048 !important;
+  box-shadow: 
+    0 25px 50px -12px rgba(0, 0, 0, 0.9),
+    0 0 0 1px rgba(255, 255, 255, 0.05) inset,
+    0 2px 4px rgba(0, 0, 0, 0.3) !important;
+}
+
+.dark-mode .position-modal-close {
+  color: #9ca3af !important;
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border-radius: 8px !important;
+  transition: all 0.2s ease !important;
+}
+
+.dark-mode .position-modal-close:hover {
+  color: #ef4444 !important;
+  background-color: rgba(239, 68, 68, 0.1) !important;
+  transform: scale(1.1) !important;
+}
+
+.dark-mode .position-modal-title {
+  color: #FFFFFF !important;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3) !important;
+  letter-spacing: -0.02em !important;
+}
+
+.dark-mode .position-modal-subtitle {
+  color: #A8A8B8 !important;
+  font-weight: 500 !important;
+}
+
+/* Chessboard wrapper - elegant frame */
+.dark-mode .position-modal-board-wrapper {
+  background: linear-gradient(145deg, #1A1A1F 0%, #222227 100%) !important;
+  padding: 1.25rem !important;
+  border-radius: 12px !important;
+  border: 1px solid #35353D !important;
+  box-shadow: 
+    0 4px 12px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset !important;
+}
+
+/* FEN display box */
+.dark-mode .position-modal-fen {
+  background: linear-gradient(145deg, #1F1F24 0%, #1A1A1F 100%) !important;
+  border: 1px solid #35353D !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) inset !important;
+}
+
+.dark-mode .position-modal-fen-label {
+  color: #A8A8B8 !important;
+  font-weight: 600 !important;
+}
+
+.dark-mode .position-modal-fen-text {
+  color: #E0E0E8 !important;
+}
+
+.dark-mode .position-modal-instructions {
+  color: #A8A8B8 !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  padding: 0.75rem 1rem !important;
+  border-radius: 8px !important;
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+  font-weight: 500 !important;
 }

@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './contexts/AuthContext';
+import { PuzzleDataProvider } from './contexts/PuzzleDataContext';
 import Header from './components/Layout/Header';
 import Footer from './components/Layout/Footer';
 import ScrollToTop from './components/ScrollToTop';
@@ -15,6 +16,7 @@ import Reports from './pages/Reports';
 import ReportDisplay from './pages/ReportDisplay';
 import FullReport from './pages/FullReport';
 import MyReports from './pages/MyReports';
+import Dashboard from './pages/Dashboard';
 import PuzzlePage from './pages/PuzzlePage';
 import Pricing from './pages/Pricing';
 import PuzzleDataTest from './components/PuzzleDataTest';
@@ -28,7 +30,7 @@ import './App.css';
 const ThemeToggleOnRoutes = () => {
   const location = useLocation();
   const p = location.pathname;
-  const isAllowed = p === '/report-display' || p === '/full-report' || p === '/my-reports' || p.startsWith('/puzzle/');
+  const isAllowed = p === '/report-display' || p === '/full-report' || p === '/my-reports' || p === '/dashboard' || p.startsWith('/puzzle/');
 
   // Guard: ensure dark class is removed when navigating away from allowed routes
   useEffect(() => {
@@ -43,8 +45,9 @@ const ThemeToggleOnRoutes = () => {
 function App() {
   return (
     <AuthProvider>
-      <Router>
-        <div className="App mobile-safe">
+      <PuzzleDataProvider>
+        <Router>
+          <div className="App mobile-safe">
           <ScrollToTop />
           <Header />
           <main className="mobile-safe">
@@ -73,6 +76,11 @@ function App() {
                   <MyReports />
                 </ProtectedRoute>
               } />
+              <Route path="/dashboard" element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              } />
               <Route path="/puzzle/:puzzleType" element={<PuzzlePage />} />
               <Route path="/puzzle-test" element={<PuzzleDataTest />} />
               <Route path="/mistake-analysis-test" element={<MistakeAnalysisTest />} />
@@ -96,7 +104,8 @@ function App() {
             }}
           />
         </div>
-      </Router>
+        </Router>
+      </PuzzleDataProvider>
     </AuthProvider>
   );
 }

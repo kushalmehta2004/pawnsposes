@@ -440,6 +440,388 @@ class PuzzleAccessService {
     };
     return ratingMap[difficulty] || 1500;
   }
+
+  /**
+   * Store puzzle with full data (for Dashboard system)
+   * Stores complete puzzle object in puzzle_data JSONB column
+   * @param {Object} puzzleData - Complete puzzle data
+   * @param {string} userId - User ID
+   * @param {string} reportId - Report ID
+   * @param {boolean} isTeaser - Whether this is a teaser puzzle
+   * @returns {Promise<Object>} - Created puzzle record
+   */
+  async storePuzzleWithFullData(puzzleData, userId, reportId, isTeaser = false) {
+    try {
+      const { data, error } = await supabase
+        .from('puzzles')
+        .insert({
+          user_id: userId,
+          report_id: reportId,
+          puzzle_key: puzzleData.id || `${Date.now()}_${Math.random()}`,
+          category: puzzleData.category,
+          difficulty: puzzleData.difficulty,
+          theme: puzzleData.theme,
+          is_locked: !isTeaser,
+          requires_subscription: !isTeaser,
+          is_teaser: isTeaser,
+          unlock_tier: isTeaser ? 'free' : 'monthly',
+          fen: puzzleData.fen,
+          title: puzzleData.title || puzzleData.description,
+          source_game_id: puzzleData.sourceGameId,
+          rating_estimate: puzzleData.ratingEstimate || this._estimateRating(puzzleData.difficulty),
+          puzzle_data: puzzleData, // Store complete puzzle object
+          is_weekly_puzzle: false, // Will be updated by mark_puzzles_as_weekly()
+          week_number: null,
+          year: null
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      console.log('✅ Puzzle with full data stored:', data.id);
+      return data;
+    } catch (error) {
+      console.error('❌ Failed to store puzzle with full data:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Store multiple puzzles with full data (batch operation for Dashboard)
+   * @param {Array} puzzles - Array of complete puzzle data
+   * @param {string} userId - User ID
+   * @param {string} reportId - Report ID
+   * @param {number} teaserCount - Number of teasers per category
+   * @returns {Promise<Array>} - Created puzzle records
+   */
+  async storePuzzlesBatchWithFullData(puzzles, userId, reportId, teaserCount = 1) {
+    try {
+      console.log(`📊 storePuzzlesBatchWithFullData called with ${puzzles.length} puzzles`);
+      console.log('📊 Sample puzzle:', puzzles[0]);
+      
+      // Group puzzles by category
+      const puzzlesByCategory = puzzles.reduce((acc, puzzle) => {
+        const category = puzzle.category || 'tactical';
+        if (!acc[category]) acc[category] = [];
+        acc[category].push(puzzle);
+        return acc;
+      }, {});
+
+      console.log('📊 Puzzles grouped by category:', Object.keys(puzzlesByCategory).map(cat => `${cat}: ${puzzlesByCategory[cat].length}`).join(', '));
+
+      // Mark first N puzzles per category as teasers
+      const puzzleRecords = [];
+      
+      for (const [category, categoryPuzzles] of Object.entries(puzzlesByCategory)) {
+        categoryPuzzles.forEach((puzzle, index) => {
+          const isTeaser = index < teaserCount;
+          
+          // Extract FEN from either 'fen' or 'position' field
+          const fenValue = puzzle.fen || puzzle.position;
+          
+          // Skip puzzles without a valid FEN
+          if (!fenValue) {
+            console.warn('⚠️ Skipping puzzle without FEN:', puzzle.id);
+            return;
+          }
+          
+          puzzleRecords.push({
+            user_id: userId,
+            report_id: reportId || null, // Make reportId optional (nullable)
+            puzzle_key: puzzle.id || `${Date.now()}_${Math.random()}_${index}`,
+            category: puzzle.category || category, // Use category from grouping if not in puzzle
+            difficulty: puzzle.difficulty || 'intermediate',
+            theme: puzzle.theme || puzzle.mistakeType || 'tactical', // Handle missing theme
+            is_locked: !isTeaser,
+            requires_subscription: !isTeaser,
+            is_teaser: isTeaser,
+            unlock_tier: isTeaser ? 'free' : 'monthly',
+            fen: fenValue,
+            title: puzzle.title || puzzle.objective || puzzle.description || 'Chess Puzzle',
+            source_game_id: puzzle.sourceGameId || puzzle.debugGameId || null,
+            rating_estimate: puzzle.ratingEstimate || puzzle.estimatedRating || puzzle.rating || this._estimateRating(puzzle.difficulty),
+            puzzle_data: puzzle, // Store complete puzzle object
+            index_in_category: index, // Store position within category (0-29)
+            is_weekly_puzzle: false,
+            week_number: null,
+            year: null
+          });
+        });
+      }
+
+      // Use upsert to handle duplicate puzzle_keys (update existing puzzles with new report_id)
+      const { data, error } = await supabase
+        .from('puzzles')
+        .upsert(puzzleRecords, {
+          onConflict: 'user_id,puzzle_key', // Unique constraint columns
+          ignoreDuplicates: false // Update existing records instead of ignoring
+        })
+        .select();
+
+      if (error) throw error;
+
+      console.log(`✅ Stored ${data.length} puzzles with full data (${puzzleRecords.filter(p => p.is_teaser).length} teasers)`);
+      return data;
+    } catch (error) {
+      console.error('❌ Failed to store puzzle batch with full data:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get puzzles by category with full data (for Dashboard display)
+   * Returns puzzles from the most recent report, ordered by index_in_category
+   * @param {string} userId - User ID
+   * @param {string} category - Puzzle category
+   * @param {number} limit - Number of puzzles to return (default: 1000 to get all puzzles)
+   * @returns {Promise<Array>} - Puzzles with full data in correct order
+   */
+  async getPuzzlesByCategory(userId, category, limit = 1000) {
+    try {
+      console.log(`🔍 getPuzzlesByCategory called for user ${userId}, category ${category}`);
+      
+      // Step 1: Get the most recent report_id for this user
+      const { data: recentReport, error: reportError } = await supabase
+        .from('reports')
+        .select('id, created_at')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (reportError) {
+        console.error('❌ Error getting most recent report:', reportError);
+        throw reportError;
+      }
+
+      if (!recentReport || recentReport.length === 0) {
+        console.warn(`⚠️ No reports found for user ${userId}`);
+        return [];
+      }
+
+      const mostRecentReportId = recentReport[0].id;
+      console.log(`📊 Most recent report ID: ${mostRecentReportId} (created: ${recentReport[0].created_at})`);
+
+      // Step 2: Get ALL puzzles from that most recent report for this category
+      const { data, error } = await supabase
+        .from('puzzles')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('report_id', mostRecentReportId)
+        .eq('category', category)
+        .not('puzzle_data', 'is', null) // Only puzzles with full data
+        .order('index_in_category', { ascending: true }) // Maintain original order
+        .limit(limit);
+
+      if (error) {
+        console.error('❌ Error loading puzzles:', error);
+        throw error;
+      }
+
+      if (!data || data.length === 0) {
+        console.warn(`⚠️ No puzzles found for report ${mostRecentReportId}, category ${category}`);
+        console.warn(`⚠️ This means either no puzzles were generated for this category or updatePuzzlesWithReportId() didn't execute`);
+        return [];
+      }
+
+      console.log(`✅ Loaded ${data.length} puzzles from most recent report for category ${category}`);
+      console.log(`📊 Report ID: ${mostRecentReportId}, Puzzles: ${data.length}`);
+      
+      return data || [];
+    } catch (error) {
+      console.error('❌ Failed to get puzzles by category:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Emergency fix: Assign orphaned puzzles to the most recent report
+   * Use this if puzzles are stuck with null report_id
+   * @param {string} userId - User ID
+   * @returns {Promise<number>} - Number of puzzles fixed
+   */
+  async fixOrphanedPuzzles(userId) {
+    try {
+      console.log('🔧 Attempting to fix orphaned puzzles for user:', userId);
+      
+      // Get the most recent report for this user
+      const { data: reports, error: reportError } = await supabase
+        .from('reports')
+        .select('id, created_at')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      
+      if (reportError) throw reportError;
+      
+      if (!reports || reports.length === 0) {
+        console.warn('⚠️ No reports found for this user');
+        return 0;
+      }
+      
+      const mostRecentReportId = reports[0].id;
+      console.log(`📊 Most recent report: ${mostRecentReportId}`);
+      
+      // Find all puzzles without report_id
+      const { data: orphanedPuzzles, error: orphanError } = await supabase
+        .from('puzzles')
+        .select('id, category, created_at')
+        .eq('user_id', userId)
+        .is('report_id', null);
+      
+      if (orphanError) throw orphanError;
+      
+      if (!orphanedPuzzles || orphanedPuzzles.length === 0) {
+        console.log('✅ No orphaned puzzles found');
+        return 0;
+      }
+      
+      console.log(`📊 Found ${orphanedPuzzles.length} orphaned puzzles`);
+      
+      // Update them with the most recent report_id
+      const { data, error } = await supabase
+        .from('puzzles')
+        .update({ report_id: mostRecentReportId })
+        .eq('user_id', userId)
+        .is('report_id', null)
+        .select();
+      
+      if (error) throw error;
+      
+      const fixedCount = data?.length || 0;
+      console.log(`✅ Fixed ${fixedCount} orphaned puzzles by assigning them to report ${mostRecentReportId}`);
+      return fixedCount;
+    } catch (error) {
+      console.error('❌ Failed to fix orphaned puzzles:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Diagnostic function to check puzzle status in database
+   * Useful for debugging why puzzles aren't showing on Dashboard
+   * @param {string} userId - User ID
+   * @returns {Promise<Object>} - Diagnostic information
+   */
+  async diagnosePuzzleStatus(userId) {
+    try {
+      console.log('🔍 Running puzzle diagnostics for user:', userId);
+      
+      // Get all puzzles for this user
+      const { data: allPuzzles, error } = await supabase
+        .from('puzzles')
+        .select('id, category, report_id, created_at, is_teaser, puzzle_data')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      
+      const diagnostics = {
+        totalPuzzles: allPuzzles?.length || 0,
+        puzzlesWithReportId: allPuzzles?.filter(p => p.report_id !== null).length || 0,
+        puzzlesWithoutReportId: allPuzzles?.filter(p => p.report_id === null).length || 0,
+        puzzlesWithData: allPuzzles?.filter(p => p.puzzle_data !== null).length || 0,
+        puzzlesWithoutData: allPuzzles?.filter(p => p.puzzle_data === null).length || 0,
+        byCategory: {},
+        recentPuzzles: allPuzzles?.slice(0, 10).map(p => ({
+          id: p.id.substring(0, 8),
+          category: p.category,
+          report_id: p.report_id ? p.report_id.substring(0, 8) : 'NULL',
+          created: p.created_at,
+          hasData: !!p.puzzle_data
+        })) || []
+      };
+      
+      // Group by category
+      ['weakness', 'mistake', 'opening', 'endgame'].forEach(category => {
+        const categoryPuzzles = allPuzzles?.filter(p => p.category === category) || [];
+        diagnostics.byCategory[category] = {
+          total: categoryPuzzles.length,
+          withReportId: categoryPuzzles.filter(p => p.report_id !== null).length,
+          withoutReportId: categoryPuzzles.filter(p => p.report_id === null).length,
+          teasers: categoryPuzzles.filter(p => p.is_teaser).length
+        };
+      });
+      
+      console.log('📊 Puzzle Diagnostics:', diagnostics);
+      return diagnostics;
+    } catch (error) {
+      console.error('❌ Failed to run diagnostics:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Update puzzles with report_id after report is saved
+   * This is needed because puzzles are generated before the report is saved
+   * @param {string} userId - User ID
+   * @param {string} reportId - Report ID to assign to puzzles
+   * @returns {Promise<number>} - Number of puzzles updated
+   */
+  async updatePuzzlesWithReportId(userId, reportId) {
+    try {
+      console.log(`🔄 Updating puzzles with report_id: ${reportId} for user: ${userId}`);
+      
+      // First, check how many puzzles need updating
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      
+      const { data: puzzlesToUpdate, error: checkError } = await supabase
+        .from('puzzles')
+        .select('id, category, created_at')
+        .eq('user_id', userId)
+        .is('report_id', null)
+        .gte('created_at', fiveMinutesAgo);
+      
+      if (checkError) {
+        console.error('❌ Error checking puzzles to update:', checkError);
+        throw checkError;
+      }
+      
+      console.log(`📊 Found ${puzzlesToUpdate?.length || 0} puzzles to update:`, 
+        puzzlesToUpdate?.map(p => ({ id: p.id.substring(0, 8), category: p.category, created: p.created_at }))
+      );
+      
+      if (!puzzlesToUpdate || puzzlesToUpdate.length === 0) {
+        console.warn('⚠️ No puzzles found to update! This might mean:');
+        console.warn('  1. Puzzles were already updated (report_id is not null)');
+        console.warn('  2. Puzzles are older than 5 minutes');
+        console.warn('  3. Puzzles were not stored yet');
+        return 0;
+      }
+      
+      // Update all puzzles for this user that don't have a report_id yet
+      const { data, error } = await supabase
+        .from('puzzles')
+        .update({ report_id: reportId })
+        .eq('user_id', userId)
+        .is('report_id', null)
+        .gte('created_at', fiveMinutesAgo)
+        .select();
+
+      if (error) {
+        console.error('❌ Supabase error during update:', error);
+        throw error;
+      }
+
+      const updatedCount = data?.length || 0;
+      console.log(`✅ Successfully updated ${updatedCount} puzzles with report_id: ${reportId}`);
+      
+      if (updatedCount !== puzzlesToUpdate.length) {
+        console.warn(`⚠️ Expected to update ${puzzlesToUpdate.length} puzzles but only updated ${updatedCount}`);
+      }
+      
+      return updatedCount;
+    } catch (error) {
+      console.error('❌ Failed to update puzzles with report_id:', error);
+      console.error('❌ Error details:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint
+      });
+      throw error;
+    }
+  }
 }
 
 // Export singleton instance

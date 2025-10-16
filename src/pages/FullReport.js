@@ -4,7 +4,6 @@ import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import reportService from '../services/reportService';
 import pdfService from '../services/pdfService';
-
 import toast from 'react-hot-toast';
 
 // Simple in-memory cache to persist across route toggles within the same session
@@ -238,16 +237,14 @@ const FullReport = () => {
       // Only save if:
       // 1. User is authenticated
       // 2. We have complete analysis data
-      // 3. This is not a saved report being viewed (no reportId)
-      // 4. This specific analysis hasn't been saved before
-      // 5. Data source indicates this is from a fresh analysis
-      // 6. ALL content has finished loading (including async components)
+      // 3. This specific analysis hasn't been saved before
+      // 4. Data source indicates this is from a fresh analysis
+      // 5. ALL content has finished loading (including async components)
       if (
         user &&
         analysis &&
         performanceMetrics &&
         recurringWeaknesses &&
-        !reportId &&
         analysisId &&
         !SAVED_ANALYSIS_IDS.has(analysisId) &&
         dataSource &&
@@ -260,8 +257,6 @@ const FullReport = () => {
             return;
           }
 
-          console.log('🔄 Auto-saving PDF report (all content loaded)...');
-
           const username = analysis?.username || analysis?.formData?.username || 'Unknown';
           const platform = analysis?.platform || analysis?.formData?.platform || 'Unknown';
           const gameCount = analysis?.games?.length || analysis?.gameData?.length || 0;
@@ -273,14 +268,158 @@ const FullReport = () => {
           // Upload PDF to storage
           const pdfUrl = await pdfService.uploadPDFToStorage(pdfBlob, title, user.id);
 
-          // Save report record with PDF URL
-          const savedReport = await reportService.saveReport(user.id, pdfUrl, platform, username, title, gameCount);
+          // ✅ PHASE 3: Get user's subscription tier
+          const subscriptionService = (await import('../services/subscriptionService')).default;
+          const subscription = await subscriptionService.getUserSubscription(user.id);
+          const subscriptionTier = subscription?.tier || 'free';
+
+        let savedReport;
+          
+          // ✅ Check if an early report was already created (reportId exists)
+          if (reportId) {
+            console.log(`🔄 Updating existing report ${reportId} with full analysis data...`);
+            
+            // Prepare full analysis data
+            const fullAnalysisData = {
+              analysis,
+              performanceMetrics,
+              recurringWeaknesses,
+              engineInsights,
+              improvementRecommendations,
+              personalizedResources,
+              username,
+                platform,
+              games: analysis?.games || analysis?.gameData || []
+            };
+            
+            // Update existing report with full data
+            savedReport = await reportService.updateReportWithAnalysis(
+              reportId,
+              fullAnalysisData,
+              pdfUrl,
+              gameCount
+            );
+            console.log('✅ Existing report updated with full analysis data');
+          } else {
+            console.log('🔄 Creating new report (no early report found)...');
+            
+            // Create new report (fallback for cases where early report wasn't created)
+            savedReport = await reportService.saveReport(
+              user.id, 
+              pdfUrl, 
+              platform, 
+              username, 
+              title, 
+              gameCount,
+              subscriptionTier
+            );
+            console.log('✅ New report created');
+          }
+          
           setReportSaved(true);
           setSavedReportId(savedReport.id);
           SAVED_ANALYSIS_IDS.add(analysisId);
           hasSavedRef.current = true;
 
           console.log('✅ PDF Report auto-saved successfully:', savedReport.id);
+
+          // ✅ Save puzzles from IndexedDB to Supabase with the reportId
+          try {
+            console.log('💾 Loading puzzles from IndexedDB and saving to Supabase...');
+            console.log('🔍 DEBUG: Username for puzzle loading:', username);
+            const { initializePuzzleDatabase, getPuzzleDatabase } = await import('../utils/puzzleDatabase');
+            const puzzleAccessService = (await import('../services/puzzleAccessService')).default;
+            
+            await initializePuzzleDatabase();
+            const db = getPuzzleDatabase();
+            const version = 'v11-adaptive-4to16plies';
+            const keyFor = (type) => `pawnsposes:puzzles:${username}:${type}:${version}`;
+            
+            console.log('🔍 DEBUG: IndexedDB keys being used:');
+            console.log('  - Weakness:', keyFor('fix-weaknesses'));
+            console.log('  - Mistakes:', keyFor('learn-mistakes'));
+            console.log('  - Openings:', keyFor('master-openings'));
+            console.log('  - Endgame:', keyFor('sharpen-endgame'));
+            
+            // Load all 4 categories from IndexedDB
+            const [cachedWeakness, cachedMistakes, cachedOpenings, cachedEndgame] = await Promise.all([
+              db.getSetting(keyFor('fix-weaknesses'), null),
+              db.getSetting(keyFor('learn-mistakes'), null),
+              db.getSetting(keyFor('master-openings'), null),
+              db.getSetting(keyFor('sharpen-endgame'), null)
+            ]);
+            
+            console.log('🔍 DEBUG: Loaded from IndexedDB:');
+            console.log('  - Weakness puzzles:', cachedWeakness?.puzzles?.length || 0);
+            console.log('  - Mistake puzzles:', cachedMistakes?.puzzles?.length || 0);
+            console.log('  - Opening puzzles:', cachedOpenings?.puzzles?.length || 0);
+            console.log('  - Endgame puzzles:', cachedEndgame?.puzzles?.length || 0);
+            
+            // Extract puzzles and add category field
+            const weaknessWithCategory = (cachedWeakness?.puzzles || []).map(p => ({
+              ...p,
+              category: 'weakness',
+              fen: p.fen || p.position
+            }));
+            
+            const mistakesWithCategory = (cachedMistakes?.puzzles || []).map(p => ({
+              ...p,
+              category: 'mistake',
+              fen: p.fen || p.position
+            }));
+            
+            const openingWithCategory = (cachedOpenings?.puzzles || []).map(p => ({
+              ...p,
+              category: 'opening',
+              fen: p.fen || p.position
+            }));
+            
+            const endgameWithCategory = (cachedEndgame?.puzzles || []).map(p => ({
+              ...p,
+              category: 'endgame',
+              fen: p.fen || p.position
+            }));
+            
+            // Combine all puzzles
+            const allPuzzles = [
+              ...weaknessWithCategory,
+              ...mistakesWithCategory,
+              ...openingWithCategory,
+              ...endgameWithCategory
+            ];
+            
+            if (allPuzzles.length > 0) {
+              console.log(`📊 Found ${allPuzzles.length} puzzles in IndexedDB:`, {
+                weakness: weaknessWithCategory.length,
+                mistake: mistakesWithCategory.length,
+                opening: openingWithCategory.length,
+                endgame: endgameWithCategory.length
+              });
+              
+              // Save to Supabase with the reportId
+              await puzzleAccessService.storePuzzlesBatchWithFullData(
+                allPuzzles,
+                user.id,
+                savedReport.id, // Use the saved report ID
+                1 // Number of teaser puzzles per category
+              );
+              
+              console.log(`✅ Saved ${allPuzzles.length} puzzles to Supabase with report_id: ${savedReport.id}`);
+              
+              // Mark puzzles as weekly for subscription tracking
+              await subscriptionService.markPuzzlesAsWeekly(savedReport.id);
+              console.log('✅ Puzzles marked as weekly for subscription tracking');
+            } else {
+              console.warn('⚠️ No puzzles found in IndexedDB to save');
+            }
+          } catch (puzzleSaveError) {
+            console.error('❌ Failed to save puzzles from IndexedDB to Supabase:', puzzleSaveError);
+            // Don't block the flow if puzzle save fails
+          }
+
+          // ✅ Increment reports generated counter
+          await subscriptionService.incrementReportsGenerated(user.id);
+          console.log('✅ Reports generated counter incremented');
 
           toast.success('Report saved as PDF successfully!', {
             duration: 3000,
@@ -974,7 +1113,7 @@ const FullReport = () => {
                     return validWeaknesses.map((weakness, index) => {
                       // ✅ NEW: Handle JSON format from FEN-based recurring weaknesses analysis
                       if (weakness.explanation && weakness.example && typeof weakness.example === 'object') {
-                        const { explanation, example, betterPlan } = weakness;
+                        const { explanation, example } = weakness;
                         const { gameNumber, moveNumber, move, fen, explanation: exampleExplanation, betterMove } = example;
                         
                         return (
@@ -1005,11 +1144,9 @@ const FullReport = () => {
                                     {(() => { let opp = example?.opponent || example?.opponentName || example?.opponent_username; let username = (analysis?.player?.username || analysis?.username || analysis?.rawAnalysis?.username || analysis?.formData?.username || '').toString(); const getNames = (g) => { const white = g?.white?.username || g?.players?.white?.user?.name || g?.gameInfo?.white || (typeof g?.white === 'string' ? g.white : g?.white?.name); const black = g?.black?.username || g?.players?.black?.user?.name || g?.gameInfo?.black || (typeof g?.black === 'string' ? g.black : g?.black?.name); return { white, black }; }; if (!username && Array.isArray(analysis?.games)) { const freq = new Map(); analysis.games.forEach(g => { const { white, black } = getNames(g); if (white) freq.set(white, (freq.get(white) || 0) + 1); if (black) freq.set(black, (freq.get(black) || 0) + 1); }); let best = ''; let bestCount = 0; freq.forEach((count, name) => { if (count > bestCount) { best = name; bestCount = count; } }); username = best || username; } if (!opp && Array.isArray(analysis?.games)) { let g = analysis.games.find(g => Number(g?.gameNumber) === Number(gameNumber)); if (!g && Number.isFinite(Number(gameNumber)) && analysis.games[Number(gameNumber) - 1]) { g = analysis.games[Number(gameNumber) - 1]; } if (g) { const { white, black } = getNames(g); const u = (username || '').toString().toLowerCase(); const w = (white || '').toString().toLowerCase(); const b = (black || '').toString().toLowerCase(); if (u && w && u === w) opp = black || g?.opponent; else if (u && b && u === b) opp = white || g?.opponent; if (!opp && g?.opponent) opp = g.opponent; } } const vsText = opp ? `vs. ${opp}` : `vs. Game ${gameNumber}`; return `${vsText} (Move ${moveNumber})`; })()}
                                   </p>
                                   
-                                  {/* Mistake and Better Plan */}
+                                  {/* Mistake with Justification */}
                                   <p style={{ fontSize: '0.875rem', color: '#1f2937', lineHeight: '1.5', margin: 0 }}>
                                     <strong>Mistake:</strong> {move ? `After ${move}, ` : ''}{exampleExplanation}
-                                    <br />
-                                    <strong>Better Plan:</strong> {betterMove ? `${betterMove}. ` : ''}{betterPlan}
                                   </p>
                                 </div>
                               );
@@ -1073,10 +1210,8 @@ const FullReport = () => {
 
                               // Prefer labeled lines if provided
                               const mistakeLM = exampleRaw.match(/(?:^|\n)\s*Mistake\s*:\s*(.+?)(?:\n|$)/i);
-                              const betterLM = exampleRaw.match(/(?:^|\n)\s*Better\s*Plan\s*:\s*(.+?)(?:\n|$)/i);
 
                               let mistakeSentence = '';
-                              let betterPlanSentence = '';
                               if (mistakeLM) {
                                 mistakeSentence = mistakeLM[1].trim();
                                 if (!/[.!?]$/.test(mistakeSentence)) mistakeSentence += '.';
@@ -1084,13 +1219,6 @@ const FullReport = () => {
                                 mistakeSentence = `After ${moveNo}. ${sanPlayed}, ${mistakeClause}${/[.!?]$/.test(mistakeClause) ? '' : '.'}`;
                               } else if (mistakeClause) {
                                 mistakeSentence = `${mistakeClause}${/[.!?]$/.test(mistakeClause) ? '' : '.'}`;
-                              }
-
-                              if (betterLM) {
-                                betterPlanSentence = betterLM[1].trim();
-                                if (!/[.!?]$/.test(betterPlanSentence)) betterPlanSentence += '.';
-                              } else if (bestSan) {
-                                betterPlanSentence = `Play ${bestSan}.`;
                               }
 
                               return (
@@ -1104,9 +1232,6 @@ const FullReport = () => {
                                   {mistakeSentence && (
                                     <p style={{ fontSize: '0.875rem', color: '#1f2937', lineHeight: '1.5', margin: 0 }}>
                                       <strong>Mistake:</strong> {mistakeSentence}
-                                      {betterPlanSentence && (
-                                        <> <br /><strong>Better Plan:</strong> {betterPlanSentence}</>
-                                      )}
                                     </p>
                                   )}
                                 </div>
@@ -1116,14 +1241,13 @@ const FullReport = () => {
                         );
                       }
 
-                      // ✅ NEW FORMAT: Check if weakness has new structure (gameInfo, mistake, betterPlan)
-                      if (weakness.gameInfo && weakness.mistake && weakness.betterPlan) {
+                      // ✅ NEW FORMAT: Check if weakness has new structure (gameInfo, mistake)
+                      if (weakness.gameInfo && weakness.mistake) {
                         // Use new format directly - no parsing needed!
                         const mainDescription = weakness.subtitle || weakness.description || '';
                         const gameExamples = [{
                           gameInfo: weakness.gameInfo,
-                          mistake: weakness.mistake,
-                          betterPlan: weakness.betterPlan
+                          mistake: weakness.mistake
                         }];
                         
                         return (
@@ -1177,14 +1301,6 @@ const FullReport = () => {
                                 margin: 0 
                               }}>
                                 <strong>Mistake:</strong> {weakness.mistake}
-                              </p>
-                              <p style={{ 
-                                fontSize: '0.875rem', 
-                                color: '#1f2937', 
-                                lineHeight: '1.5', 
-                                marginTop: '0.5rem' 
-                              }}>
-                                <strong>Better Plan:</strong> {weakness.betterPlan}
                               </p>
                             </div>
                           </div>
@@ -1251,16 +1367,8 @@ const FullReport = () => {
                           const moveNum = moveMatch?.[1];
                           const move = moveMatch?.[2];
                           
-                          // Extract mistake and better plan
+                          // Extract mistake
                           let mistake = content;
-                          let betterPlan = "Consider alternative moves that improve your position.";
-                          
-                          // Look for "Better Plan" or similar sections
-                          const betterPlanMatch = content.match(/(?:Better Plan|Alternative|Instead)[^.]*[:.]\s*([^.]+\.)/i);
-                          if (betterPlanMatch) {
-                            betterPlan = betterPlanMatch[1].trim();
-                            mistake = content.replace(betterPlanMatch[0], '').trim();
-                          }
                           
                           // Clean up mistake text
                           mistake = mistake
@@ -1274,8 +1382,7 @@ const FullReport = () => {
                           
                           gameExamples.push({
                             gameInfo: `vs. ${opponent} (Move ${moveNum})`,
-                            mistake: `After ${moveNum}. ${move}, ${mistake}`,
-                            betterPlan: betterPlan
+                            mistake: `After ${moveNum}. ${move}, ${mistake}`
                           });
                         });
                       }
@@ -1302,7 +1409,6 @@ const FullReport = () => {
                           
                           // Generate detailed mistake explanations based on the weakness context
                           let mistake = "";
-                          let betterPlan = "";
                           
                           // Extract context around the game reference for better analysis
                           const context = match[0];
@@ -1312,22 +1418,17 @@ const FullReport = () => {
                           // Provide context-specific analysis based on weakness type
                           if (weaknessTitle.includes('tactical') || weaknessTitle.includes('hidden')) {
                             mistake = `The move ${move} overlooks a critical tactical sequence. In this complex position, you missed forcing moves that could have exploited your opponent's piece coordination weaknesses.`;
-                            betterPlan = `Look for tactical shots like ${move.includes('g') ? 'f4-f5 breakthrough' : move.includes('B') ? 'Bxh7+ sacrifice' : 'Nxf7 knight sacrifice'} or other forcing continuations that create immediate threats.`;
                           } else if (weaknessTitle.includes('positional') || weaknessTitle.includes('prophylaxis')) {
                             mistake = `The move ${move} fails to address the positional imbalances in the position. You're focusing on immediate tactics while neglecting long-term strategic factors like pawn structure and piece coordination.`;
-                            betterPlan = `Consider moves that improve your position structurally, such as ${move.includes('e') ? 'd4-d5 space gain' : move.includes('g') ? 'h3 and g4 kingside expansion' : 'Rd1 and doubling rooks'} to build lasting advantages.`;
                           } else if (weaknessTitle.includes('calculation') || weaknessTitle.includes('depth')) {
                             mistake = `The move ${move} shows insufficient calculation depth. You're not seeing the full consequences of this move, particularly your opponent's strongest responses 3-4 moves ahead.`;
-                            betterPlan = `Calculate deeper variations, especially after ${move.includes('g') ? 'opponent\'s f6 counter-attack' : move.includes('B') ? 'opponent\'s piece exchanges' : 'opponent\'s central counterplay'} and ensure your move works in all lines.`;
                           } else {
                             mistake = `The move ${move} doesn't align with the position's requirements. ${pawnLoss ? `This oversight costs approximately ${pawnLoss} pawns in evaluation.` : 'The move lacks strategic purpose.'}`;
-                            betterPlan = `Focus on moves that address the position's key features: piece activity, king safety, and pawn structure.`;
                           }
                           
                           gameExamples.push({
                             gameInfo: `vs. ${opponent} (Move ${moveNum})`,
-                            mistake: mistake,
-                            betterPlan: betterPlan
+                            mistake: mistake
                           });
                         });
                         
@@ -1374,23 +1475,18 @@ const FullReport = () => {
                             // Generate contextual analysis
                             const weaknessTitle = weakness.title.toLowerCase();
                             let mistake = "";
-                            let betterPlan = "";
                             
                             if (weaknessTitle.includes('tactical')) {
                               mistake = `The move ${move} misses a tactical opportunity in a sharp position. Your calculation didn't go deep enough to spot the winning combination available.`;
-                              betterPlan = `Look for forcing sequences starting with checks, captures, and threats. Consider moves like Rxe6, Nxf7+, or Bxh7+ that create immediate tactical pressure.`;
                             } else if (weaknessTitle.includes('positional')) {
                               mistake = `The move ${move} ignores the positional demands of the position. You're not addressing key structural weaknesses or improving your piece coordination.`;
-                              betterPlan = `Focus on moves that improve your worst-placed pieces, control key squares, or create long-term advantages like Nd5, Bc4, or f4-f5.`;
                             } else {
                               mistake = `The move ${move} doesn't capitalize on the position's potential. You're missing the critical point of this position type.`;
-                              betterPlan = `Study similar positions and look for typical plans involving piece improvements, pawn breaks, or tactical motifs.`;
                             }
                             
                             gameExamples.push({
                               gameInfo: `vs. ${opponent} (Move ${moveNum})`,
-                              mistake: mistake,
-                              betterPlan: betterPlan
+                              mistake: mistake
                             });
                           });
                         }
@@ -1432,16 +1528,14 @@ const FullReport = () => {
                             const san = chosenMove?.san || chosenMove?.notation || chosenMove?.move || '';
                             gameExamples.push({
                               gameInfo: `vs. ${opponent || 'opponent'} (Move ${moveNum})`,
-                              mistake: san ? `After ${moveNum}. ${san}, this position reflects the weakness: ${(weakness.title || '').toLowerCase()}.` : `This position reflects the weakness: ${(weakness.title || '').toLowerCase()}.`,
-                              betterPlan: 'Look for a plan that improves piece activity, king safety, and pawn structure in line with the theme.'
+                              mistake: san ? `After ${moveNum}. ${san}, this position reflects the weakness: ${(weakness.title || '').toLowerCase()}.` : `This position reflects the weakness: ${(weakness.title || '').toLowerCase()}.`
                             });
                           }
                         } catch (e) {
                           // As a last resort, create a generic example card
                           gameExamples.push({
                             gameInfo: `Example`,
-                            mistake: `This position illustrates the theme: ${(weakness.title || '').toLowerCase()}.`,
-                            betterPlan: 'Adopt a plan consistent with the theme: improve piece activity, ensure king safety, and fix structural issues.'
+                            mistake: `This position illustrates the theme: ${(weakness.title || '').toLowerCase()}.`
                           });
                         }
                       }
@@ -1495,8 +1589,6 @@ const FullReport = () => {
                                 lineHeight: '1.5'
                               }}>
                                 <strong>Mistake:</strong> {example.mistake}
-                                <br />
-                                <strong>Better Plan:</strong> {example.betterPlan}
                               </p>
                             </div>
                           ))}
@@ -1610,22 +1702,59 @@ const FullReport = () => {
                                     fontSize: '0.875rem', 
                                     color: '#1f2937',
                                     marginBottom: '0.5rem',
-                                    lineHeight: '1.5'
+                                    lineHeight: '1.5',
+                                    whiteSpace: 'pre-wrap',
+                                    wordWrap: 'break-word'
                                   }}>
                                     <strong>Why it's a mistake:</strong> {example.explanation}
                                   </p>
                                 )}
 
-                                {/* Better Plan */}
-                                {example.betterPlan && (
-                                  <p style={{ 
-                                    fontSize: '0.875rem', 
-                                    color: '#059669',
-                                    margin: 0,
-                                    lineHeight: '1.5'
+                                {/* FEN Position and View on Lichess Button */}
+                                {example.fen && (
+                                  <div style={{
+                                    marginTop: '0.75rem',
+                                    paddingTop: '0.75rem',
+                                    borderTop: '1px solid #e5e7eb'
                                   }}>
-                                    <strong>Better plan:</strong> {example.betterPlan}
-                                  </p>
+                                    <p style={{
+                                      fontSize: '0.7rem',
+                                      color: '#9ca3af',
+                                      marginBottom: '0.5rem',
+                                      fontFamily: 'monospace',
+                                      wordBreak: 'break-all'
+                                    }}>
+                                      <strong>Position:</strong> {example.fen}
+                                    </p>
+                                    <button
+                                      onClick={() => {
+                                        // Open position on Lichess analysis board
+                                        // Lichess expects FEN with spaces replaced by underscores
+                                        const fenForLichess = example.fen.replace(/ /g, '_');
+                                        const lichessUrl = `https://lichess.org/analysis/${fenForLichess}`;
+                                        window.open(lichessUrl, '_blank', 'noopener,noreferrer');
+                                      }}
+                                      style={{
+                                        backgroundColor: '#3b82f6',
+                                        color: 'white',
+                                        padding: '0.5rem 1rem',
+                                        borderRadius: '0.375rem',
+                                        border: 'none',
+                                        fontSize: '0.875rem',
+                                        fontWeight: '500',
+                                        cursor: 'pointer',
+                                        transition: 'background-color 0.2s',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem'
+                                      }}
+                                      onMouseEnter={(e) => e.target.style.backgroundColor = '#2563eb'}
+                                      onMouseLeave={(e) => e.target.style.backgroundColor = '#3b82f6'}
+                                    >
+                                      <i className="fas fa-external-link-alt"></i>
+                                      Analyze on Lichess
+                                    </button>
+                                  </div>
                                 )}
                               </div>
                             ))}

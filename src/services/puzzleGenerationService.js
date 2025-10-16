@@ -6,6 +6,7 @@
 import puzzleDataService from './puzzleDataService.js';
 import openingPuzzleService from './openingPuzzleService.js';
 import weaknessPuzzleService from './weaknessPuzzleService.js';
+import puzzleService from './puzzleService.js';
 import { MISTAKE_TYPES, TACTICAL_THEMES, PUZZLE_CATEGORIES, DIFFICULTY_LEVELS } from '../utils/dataModels.js';
 import stockfishAnalyzer from '../utils/stockfishAnalysis.js';
 import { Chess } from 'chess.js';
@@ -1058,6 +1059,134 @@ class PuzzleGenerationService {
     if (absEval < 100) return 'beginner';
     if (absEval < 300) return 'intermediate';
     return 'advanced';
+  }
+
+  /**
+   * Generate and save weakness puzzles to Supabase
+   */
+  async generateAndSaveWeaknessPuzzles(userId, username, options = {}) {
+    try {
+      console.log(`🧩 Generating and saving weakness puzzles for user ${userId}...`);
+      
+      const puzzles = await this.generateWeaknessPuzzles(username, options);
+      
+      if (puzzles.length === 0) {
+        console.warn('⚠️ No weakness puzzles generated');
+        return [];
+      }
+
+      // Add category to puzzles
+      const puzzlesWithCategory = puzzles.map(p => ({
+        ...p,
+        category: 'weakness',
+        fen: p.position || p.fen
+      }));
+
+      // Save to Supabase
+      const savedPuzzles = await puzzleService.savePuzzlesBatch(userId, puzzlesWithCategory);
+      console.log(`✅ Saved ${savedPuzzles.length} weakness puzzles to Supabase`);
+      
+      return savedPuzzles;
+    } catch (error) {
+      console.error('❌ Error generating and saving weakness puzzles:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate and save mistake puzzles to Supabase
+   */
+  async generateAndSaveMistakePuzzles(userId, username, options = {}) {
+    try {
+      console.log(`🧩 Generating and saving mistake puzzles for user ${userId}...`);
+      
+      const puzzles = await this.generateMistakePuzzles(username, options);
+      
+      if (puzzles.length === 0) {
+        console.warn('⚠️ No mistake puzzles generated');
+        return [];
+      }
+
+      // Add category to puzzles
+      const puzzlesWithCategory = puzzles.map(p => ({
+        ...p,
+        category: 'mistake',
+        fen: p.position || p.fen
+      }));
+
+      // Save to Supabase
+      const savedPuzzles = await puzzleService.savePuzzlesBatch(userId, puzzlesWithCategory);
+      console.log(`✅ Saved ${savedPuzzles.length} mistake puzzles to Supabase`);
+      
+      return savedPuzzles;
+    } catch (error) {
+      console.error('❌ Error generating and saving mistake puzzles:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate and save opening puzzles to Supabase
+   */
+  async generateAndSaveOpeningPuzzles(userId, username, options = {}) {
+    try {
+      console.log(`🧩 Generating and saving opening puzzles for user ${userId}...`);
+      
+      const puzzles = await this.generateOpeningPuzzles(username, options);
+      
+      if (puzzles.length === 0) {
+        console.warn('⚠️ No opening puzzles generated');
+        return [];
+      }
+
+      // Add category to puzzles
+      const puzzlesWithCategory = puzzles.map(p => ({
+        ...p,
+        category: 'opening',
+        fen: p.position || p.fen
+      }));
+
+      // Save to Supabase
+      const savedPuzzles = await puzzleService.savePuzzlesBatch(userId, puzzlesWithCategory);
+      console.log(`✅ Saved ${savedPuzzles.length} opening puzzles to Supabase`);
+      
+      return savedPuzzles;
+    } catch (error) {
+      console.error('❌ Error generating and saving opening puzzles:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate and save endgame puzzles to Supabase
+   */
+  async generateAndSaveEndgamePuzzles(userId, options = {}) {
+    try {
+      console.log(`🧩 Generating and saving endgame puzzles for user ${userId}...`);
+      
+      const puzzles = await this.generateEndgamePuzzles(options);
+      
+      if (puzzles.length === 0) {
+        console.warn('⚠️ No endgame puzzles generated');
+        return [];
+      }
+
+      // Add category to puzzles
+      const puzzlesWithCategory = puzzles.map(p => ({
+        ...p,
+        category: 'endgame',
+        fen: p.position || p.fen
+      }));
+
+      // Save to Supabase
+      const savedPuzzles = await puzzleService.savePuzzlesBatch(userId, puzzlesWithCategory);
+      console.log(`✅ Saved ${savedPuzzles.length} endgame puzzles to Supabase`);
+      
+      return savedPuzzles;
+    } catch (error) {
+      console.error('❌ Error generating and saving endgame puzzles:', error);
+      throw error;
+    }
   }
 }
 

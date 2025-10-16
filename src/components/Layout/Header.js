@@ -131,12 +131,12 @@ const Header = () => {
                 {showUserMenu && (
                   <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-50">
                     <Link
-                      to="/my-reports"
+                      to="/dashboard"
                       onClick={() => setShowUserMenu(false)}
                       className="flex items-center space-x-2 w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-100 transition-colors"
                     >
                       <User size={16} />
-                      <span>My Reports</span>
+                      <span>Dashboard</span>
                     </Link>
                     <button
                       onClick={handleSignOut}
@@ -209,12 +209,12 @@ const Header = () => {
                   {user && (
                     <div className="border-t border-gray-200 pt-2 mt-2">
                       <Link
-                        to="/my-reports"
+                        to="/dashboard"
                         onClick={closeMenu}
                         className="flex items-center justify-center space-x-2 w-full px-4 py-2 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
                       >
                         <User size={18} />
-                        <span>My Reports</span>
+                        <span>Dashboard</span>
                       </Link>
                       <button
                         onClick={handleSignOut}

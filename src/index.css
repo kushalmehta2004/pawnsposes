@@ -70,6 +70,70 @@
     @apply w-full max-w-full overflow-x-hidden;
   }
 
+  /* Position Viewer Modal - Light Mode Defaults */
+  .position-modal-content {
+    background: linear-gradient(145deg, #ffffff 0%, #f9fafb 100%);
+    border: 1px solid #e5e7eb;
+    box-shadow: 
+      0 25px 50px -12px rgba(0, 0, 0, 0.15),
+      0 0 0 1px rgba(0, 0, 0, 0.02) inset;
+  }
+
+  .position-modal-close {
+    background-color: rgba(0, 0, 0, 0.03);
+    border-radius: 8px;
+    transition: all 0.2s ease;
+  }
+
+  .position-modal-close:hover {
+    background-color: rgba(239, 68, 68, 0.1);
+    transform: scale(1.1);
+  }
+
+  .position-modal-title {
+    color: #1f2937;
+    letter-spacing: -0.02em;
+  }
+
+  .position-modal-subtitle {
+    color: #6b7280;
+    font-weight: 500;
+  }
+
+  .position-modal-board-wrapper {
+    background: linear-gradient(145deg, #f9fafb 0%, #f3f4f6 100%);
+    padding: 1.25rem;
+    border-radius: 12px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 
+      0 2px 8px rgba(0, 0, 0, 0.05),
+      0 0 0 1px rgba(0, 0, 0, 0.02) inset;
+  }
+
+  .position-modal-fen {
+    background: linear-gradient(145deg, #f9fafb 0%, #f3f4f6 100%);
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) inset;
+  }
+
+  .position-modal-fen-label {
+    color: #6b7280;
+    font-weight: 600;
+  }
+
+  .position-modal-fen-text {
+    color: #374151;
+  }
+
+  .position-modal-instructions {
+    color: #6b7280;
+    background: rgba(0, 0, 0, 0.02);
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    font-weight: 500;
+  }
+
   /* Prevent horizontal scroll on mobile */
   @media (max-width: 768px) {
     * {

@@ -897,27 +897,8 @@ EXPLANATION STYLE: Use precise chess terminology. Include deep strategic and tac
           }
         }
 
-        // ✅ PHASE 3: Save report to Supabase for puzzle access control
-        let reportId = null;
-        if (user) {
-          try {
-            console.log('💾 Saving report to Supabase...');
-            const savedReport = await reportService.saveReport(
-              user.id,
-              completeAnalysisResult,
-              formData.platform,
-              formData.username
-            );
-            reportId = savedReport.id;
-            console.log('✅ Report saved to Supabase with ID:', reportId);
-            
-            // Add reportId to analysis result for puzzle generation
-            completeAnalysisResult.reportId = reportId;
-          } catch (saveError) {
-            console.error('❌ Failed to save report to Supabase:', saveError);
-            // Don't block navigation if save fails - puzzles will work without access control
-          }
-          }
+        // ✅ Report will be saved when user visits FullReport page (with PDF)
+        // This prevents duplicate saves - one without PDF and one with PDF
 
         // ✅ PUZZLE PRE-FETCH: Start pre-fetching puzzles in the background
         // This ensures puzzles are ready when user navigates to puzzle pages
@@ -2030,31 +2011,34 @@ ${game.criticalMoments.slice(0, 3).map(moment => `
 **REQUIRED FORMAT (EXACTLY):**
 **WEAKNESS_1: [Specific Chess Concept]**
 **SUBTITLE:** [One sentence explaining the pattern]
-**EXAMPLE_1:** vs. [opponent] (Move [number]) - Mistake: [description]. Better Plan: [specific improvement]
-**EXAMPLE_2:** vs. [opponent] (Move [number]) - Mistake: [description]. Better Plan: [specific improvement]  
-**EXAMPLE_3:** vs. [opponent] (Move [number]) - Mistake: [description]. Better Plan: [specific improvement]
-**BETTER_PLAN:** [Overall strategic advice]
+**EXAMPLE_1:** vs. [opponent] (Move [number]) - Mistake: [TWO-LINE JUSTIFICATION explaining exactly why this move was a mistake and what was wrong with the decision-making]
+**EXAMPLE_2:** vs. [opponent] (Move [number]) - Mistake: [TWO-LINE JUSTIFICATION explaining exactly why this move was a mistake and what was wrong with the decision-making]  
+**EXAMPLE_3:** vs. [opponent] (Move [number]) - Mistake: [TWO-LINE JUSTIFICATION explaining exactly why this move was a mistake and what was wrong with the decision-making]
 
 **WEAKNESS_2: [Different Specific Chess Concept]**
 **SUBTITLE:** [One sentence explaining the pattern]
-**EXAMPLE_1:** vs. [opponent] (Move [number]) - Mistake: [description]. Better Plan: [specific improvement]
-**EXAMPLE_2:** vs. [opponent] (Move [number]) - Mistake: [description]. Better Plan: [specific improvement]
-**EXAMPLE_3:** vs. [opponent] (Move [number]) - Mistake: [description]. Better Plan: [specific improvement]
-**BETTER_PLAN:** [Overall strategic advice]
+**EXAMPLE_1:** vs. [opponent] (Move [number]) - Mistake: [TWO-LINE JUSTIFICATION explaining exactly why this move was a mistake and what was wrong with the decision-making]
+**EXAMPLE_2:** vs. [opponent] (Move [number]) - Mistake: [TWO-LINE JUSTIFICATION explaining exactly why this move was a mistake and what was wrong with the decision-making]  
+**EXAMPLE_3:** vs. [opponent] (Move [number]) - Mistake: [TWO-LINE JUSTIFICATION explaining exactly why this move was a mistake and what was wrong with the decision-making]
 
 **WEAKNESS_3: [Third Specific Chess Concept]**
 **SUBTITLE:** [One sentence explaining the pattern]
-**EXAMPLE_1:** vs. [opponent] (Move [number]) - Mistake: [description]. Better Plan: [specific improvement]
-**EXAMPLE_2:** vs. [opponent] (Move [number]) - Mistake: [description]. Better Plan: [specific improvement]
-**EXAMPLE_3:** vs. [opponent] (Move [number]) - Mistake: [description]. Better Plan: [specific improvement]
-**BETTER_PLAN:** [Overall strategic advice]
+**EXAMPLE_1:** vs. [opponent] (Move [number]) - Mistake: [TWO-LINE JUSTIFICATION explaining exactly why this move was a mistake and what was wrong with the decision-making]
+**EXAMPLE_2:** vs. [opponent] (Move [number]) - Mistake: [TWO-LINE JUSTIFICATION explaining exactly why this move was a mistake and what was wrong with the decision-making]  
+**EXAMPLE_3:** vs. [opponent] (Move [number]) - Mistake: [TWO-LINE JUSTIFICATION explaining exactly why this move was a mistake and what was wrong with the decision-making]
+
+CRITICAL: For each EXAMPLE, provide EXACTLY 2 lines of explanation after "Mistake:". Each line should be a complete thought.
+Line 1: What was the concrete problem with the move?
+Line 2: What principle or objective was violated?
+
+Examples of TWO-LINE format:
+- "Moved the bishop to an undefended square, allowing it to be captured with tempo. This violated the principle of piece safety and the tactical calculation principle."
+- "Played a move that blocked the escape route for the king. The king would be trapped in the center if the opponent attacked with forcing moves."
+ 
 
 Use specific chess concepts like: "Inefficient Piece Coordination and Prophylactic Thinking", "Backward Pawn Weakness Assessment", "Color Complex Control", "Outpost Creation and Exploitation", "Initiative Maintenance", "Pawn Lever Timing", etc.
 
-Keep examples concise and actionable.
-- "Mishandled backward pawn weakness"
-- "Ignored outpost creation opportunity"
-- "Failed to apply overprotection principle"`;
+Keep examples concise and actionable.`;
 
     return prompt;
   };
@@ -2089,23 +2073,51 @@ Keep examples concise and actionable.
         const subtitleMatch = section.match(/\*\*SUBTITLE:\*\*\s*([^\n*]+)/);
         const subtitle = subtitleMatch ? subtitleMatch[1].trim() : '';
         
-        // ✅ UPDATED: Extract new format fields (GAME_INFO, MISTAKE, BETTER_PLAN)
-        const gameInfoMatch = section.match(/\*\*GAME_INFO:\*\*\s*([^\n*]+)/);
-        const mistakeMatch = section.match(/\*\*MISTAKE:\*\*\s*([^\n]+?)(?=\*\*BETTER_PLAN|\*\*WEAKNESS|$)/s);
-        const betterPlanMatch = section.match(/\*\*BETTER_PLAN:\*\*\s*([^\n]+?)(?=FEN:|$)/s);
-        const fenMatch = section.match(/FEN:\s*([^\n]+)/);
+        // ✅ UPDATED: Extract EXAMPLE_1 (first example with 2-line justification)
+        const exampleMatch = section.match(/\*\*EXAMPLE_1:\*\*\s*(.+?)(?=\*\*EXAMPLE_2:|\*\*WEAKNESS_|\*\*$|$)/s);
+        const exampleText = exampleMatch ? exampleMatch[1].trim() : '';
         
-        const gameInfo = gameInfoMatch ? gameInfoMatch[1].trim() : '';
-        const mistake = mistakeMatch ? mistakeMatch[1].trim() : '';
-        const betterPlan = betterPlanMatch ? betterPlanMatch[1].trim() : '';
+        // Parse the example to extract opponent, move number, and 2-line justification
+        let gameInfo = '';
+        let mistake = '';
         
-        const fen = fenMatch ? fenMatch[1].trim() : '';
+        if (exampleText) {
+          // Extract: "vs. [opponent] (Move [number]) - Mistake: [2-line justification]"
+          // First, extract the opponent and move number
+          const headerMatch = exampleText.match(/vs\.\s*(\w+).*?\(Move\s+(\d+)\)/);
+          
+          if (headerMatch) {
+            const opponent = headerMatch[1];
+            const moveNum = headerMatch[2];
+            gameInfo = `vs. ${opponent} (Move ${moveNum})`;
+            
+            // Now extract everything after "Mistake:" as the 2-line justification
+            const mistakeStart = exampleText.indexOf('Mistake:');
+            if (mistakeStart !== -1) {
+              mistake = exampleText.substring(mistakeStart + 8).trim();
+            } else {
+              mistake = exampleText;
+            }
+          } else {
+            // Fallback: try to extract just the mistake part
+            const mistakeIdx = exampleText.indexOf('Mistake:');
+            if (mistakeIdx !== -1) {
+              mistake = exampleText.substring(mistakeIdx + 8).trim();
+            } else {
+              mistake = exampleText;
+            }
+          }
+        }
+        
+        const betterPlan = ''; // No longer used in new format, but kept for compatibility
+         
+        const fen = '';
         
         console.log(`   📍 Game Info: "${gameInfo}"`);
-        console.log(`   ❌ Mistake: "${mistake.substring(0, 100)}..."`);
-        console.log(`   ✅ Better Plan: "${betterPlan.substring(0, 100)}..."`);
-        console.log(`   ♟️ FEN: "${fen}"`);
-        
+        console.log(`   ❌ 2-Line Justification: "${mistake.substring(0, 100)}..."`);
+        console.log(`   ✅ Subtitle: "${subtitle.substring(0, 100)}..."`);
+        console.log(`   ♟️ Example Text: "${exampleText.substring(0, 100)}..."`);
+         
         // ✅ UPDATED: Validate new format - must have GAME_INFO with "vs. opponent (Move X)"
         const hasSpecificMoves = gameInfo.includes('vs.') && gameInfo.includes('Move');
         // ✅ ENHANCED: Smart validation - Check for specific chess concepts first
@@ -2165,20 +2177,20 @@ Keep examples concise and actionable.
           console.log('❌ No chess terminology found in examples');
           throw new Error('AI failed to use chess terminology in analysis');
         }
-        if (!mistake || !betterPlan) {
-          console.log('❌ Missing mistake or better plan');
-          throw new Error('AI failed to provide complete weakness analysis');
+        if (!mistake) {
+          console.log('❌ Missing 2-line justification');
+          throw new Error('AI failed to provide 2-line justification for mistakes');
         }
         
-        // ✅ NEW FORMAT: Store weakness with new structure
-         
+        // ✅ NEW FORMAT: Store weakness with new structure (with 2-line justification)
+          
         
         weaknesses.push({
           title,
           subtitle,
           gameInfo,
-          mistake,
-          betterPlan,
+           mistake, // Now contains the 2-line justification
+          betterPlan: betterPlan || '',
           fen: fen || null
         });
       }
@@ -4779,19 +4791,19 @@ Structure your response EXACTLY as follows:
 **WEAKNESS_1: [Unique specific title based on actual patterns from the games]**
 **SUBTITLE:** [2-sentence general description of this weakness pattern]
 **GAME_INFO:** vs. [ACTUAL_OPPONENT_NAME] (Move [ACTUAL_MOVE_NUMBER])
-**MISTAKE:** [Describe the specific mistake made in this exact game and move - use the critical moments data provided]
+**MISTAKE:** [Line 1: The concrete problem with this move (what went wrong tactically or positionally). Line 2: Why it violates chess principles (what rule/objective was violated, e.g., king safety, material balance, tempo). EXAMPLE: "The f4 move weakened the kingside with no compensation. This violated the principle of prophylactic thinking and king safety."]
 **BETTER_PLAN:** [Concrete improvement advice for this specific situation]
 
 **WEAKNESS_2: [Unique specific title based on actual patterns from the games]**
 **SUBTITLE:** [2-sentence general description of this weakness pattern]
 **GAME_INFO:** vs. [ACTUAL_OPPONENT_NAME] (Move [ACTUAL_MOVE_NUMBER])
-**MISTAKE:** [Describe the specific mistake made in this exact game and move - use the critical moments data provided]
+**MISTAKE:** [Line 1: The concrete problem with this move (what went wrong tactically or positionally). Line 2: Why it violates chess principles (what rule/objective was violated, e.g., king safety, material balance, tempo). EXAMPLE: "The f4 move weakened the kingside with no compensation. This violated the principle of prophylactic thinking and king safety."]
 **BETTER_PLAN:** [Concrete improvement advice for this specific situation]
 
 **WEAKNESS_3: [Unique specific title based on actual patterns from the games]**
 **SUBTITLE:** [2-sentence general description of this weakness pattern]
 **GAME_INFO:** vs. [ACTUAL_OPPONENT_NAME] (Move [ACTUAL_MOVE_NUMBER])
-**MISTAKE:** [Describe the specific mistake made in this exact game and move - use the critical moments data provided]
+**MISTAKE:** [Line 1: The concrete problem with this move (what went wrong tactically or positionally). Line 2: Why it violates chess principles (what rule/objective was violated, e.g., king safety, material balance, tempo). EXAMPLE: "The f4 move weakened the kingside with no compensation. This violated the principle of prophylactic thinking and king safety."]
 **BETTER_PLAN:** [Concrete improvement advice for this specific situation]
 **WEAKNESSES_END**
 
@@ -5473,3 +5485,4 @@ const performPawnsposesAIAnalysis = async (games, fenData, formData) => {
 
 
 export default Reports;
+

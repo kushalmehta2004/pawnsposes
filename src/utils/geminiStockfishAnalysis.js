@@ -1518,10 +1518,14 @@ export const generateReportFromGeminiFullGames = async (playerInfo, gameContext,
 `- Provide EXACTLY 3 recurringWeaknesses. Titles must be conceptual and descriptive (e.g., outposts/weak squares, pawn breaks & pawn tension, trading good vs. bad pieces, exchange sacrifices, counter-attacking instincts, static vs. dynamic evaluation, space advantage handling, minority attacks, isolated queen pawn play, passed pawn conversion, evaluating critical positions, improving worst-placed piece, candidate-move generation & 3-4 move visualization).\n` +
 `- Each weakness needs a detailed explanation of WHY it recurs, highlighting strategic/psychological habits rather than tactical blunders.\n` +
 `- For every weakness, include 1 example. All examples must be strategic (no simple piece blunders) and reference the user's move at moveNumber >= 16.\n` +
-`- Use moves played by ${safeName} only. Validate SAN and FEN via movesWithFen before outputting.\n` +
-`- Pull the fenAfter for the user's move when available; otherwise use fenBefore. Always supply a FEN string.\n` +
-`- Each example must include: gameNumber, moveNumber, the SAN move played, a concise justification of the strategic error, a betterPlan describing the correct plan, and a single betterMove suggestion (SAN).\n` +
-`- Strict game diversity: do not reuse a gameNumber across different weaknesses. If there are insufficient games, reduce the number of examples instead.\n\n` +
+`- CRITICAL: Use ONLY moves played by ${safeName}. Look at movesWithFen array and filter by playerColor to identify which moves belong to ${safeName}. NEVER use opponent moves.\n` +
+`- CRITICAL: Always use fenBefore for the FEN field. The position must show the board BEFORE the user made their move, so they can see where they should have played the better move. Never use fenAfter.\n` +
+`- CRITICAL: The "played" field must contain the EXACT SAN move that ${safeName} actually played (from movesWithFen where color matches playerColor). Verify this is the user's move, not the opponent's.\n` +
+`- CRITICAL: The "betterMove" field will be replaced with Stockfish's top engine recommendation during post-processing. You can suggest a move, but it will be overridden with the actual Stockfish analysis. Focus on making the justification and betterPlan accurate.\n` +
+`- CRITICAL: Do NOT generate hypothetical or impossible moves. All moves in the "played" field must be actual moves from the game data. The system will validate and correct the betterMove field with Stockfish's analysis.\n` +
+`- Each example must include: gameNumber, moveNumber (the full move number where ${safeName} played), the SAN move played (the actual move ${safeName} played), a concise justification of the strategic error with specific square names and piece references, a betterPlan describing the correct strategic approach, and a single betterMove suggestion (will be replaced with Stockfish's top move).\n` +
+`- Strict game diversity: do not reuse a gameNumber across different weaknesses. If there are insufficient games, reduce the number of examples instead.\n` +
+`- Make examples concrete and specific: reference actual piece positions (e.g., "knight on f6", "bishop on c4"), square names (e.g., "d5", "e4"), and clear strategic concepts. Avoid vague descriptions like "poor piece placement" - instead say "knight misplaced on a5 instead of the superior outpost on d5".\n\n` +
 `ENGINE INSIGHTS:\n` +
 `- Summarize how the user's evaluations shift across middlegame/endgame phases, their calculation depth, and whether their problems arise in tactical or positional settings. Reference recurring themes you saw in the games.\n\n` +
 `IMPROVEMENT RECOMMENDATIONS:\n` +
@@ -1636,15 +1640,36 @@ Begin your analysis now.` + JSON.stringify(compactGames);
       const userMove = getUserMoveAt(gnum, mv);
       if (userMove) {
         console.log(`  -> ✓ Valid user move found: ${userMove.san}`);
+        
+        // Find the corresponding mistake to get Stockfish's best move
+        const mistakes = mistakesByGameNumber.get(gnum) || [];
+        const matchingMistake = mistakes.find(m => Number(m.moveNumber) === mv);
+        
+        // CRITICAL: Always use Stockfish's best move, never Gemini's suggestion
+        const stockfishBestMove = matchingMistake?.bestMove || '';
+        
+        // Validate that the best move is not empty
+        if (!stockfishBestMove) {
+          console.log(`  -> Warning: No Stockfish best move found for Game ${gnum}, Move ${mv}`);
+        } else {
+          console.log(`  -> ✓ Stockfish best move: ${stockfishBestMove}`);
+        }
+        
+        // Validate that the played move matches what Gemini suggested (for accuracy check)
+        if (ex.played && ex.played !== userMove.san) {
+          console.log(`  -> ⚠️ Gemini suggested wrong move: "${ex.played}" vs actual: "${userMove.san}"`);
+        }
+        
         out.push({
           gameNumber: gnum,
           moveNumber: mv,
-          played: userMove.san, // enforce real played SAN
-          fen: ex.fen || userMove.fenAfter,
+          played: userMove.san, // enforce real played SAN (user's actual move)
+          fen: userMove.fenBefore, // CRITICAL: Use fenBefore to show position before the move
           justification: ex.justification || '',
           betterPlan: ex.betterPlan || '',
-          betterMove: ex.betterMove || '',
-          playerColor: gameIndex.get(gnum)?.playerColor || 'unknown'
+          betterMove: stockfishBestMove, // CRITICAL: Use ONLY Stockfish's top recommendation
+          playerColor: gameIndex.get(gnum)?.playerColor || 'unknown',
+          centipawnLoss: matchingMistake?.scoreDrop || 0
         });
         usedGames.add(gnum); // Mark this game as used
         console.log(`  -> Game ${gnum} marked as used. Used games now:`, Array.from(usedGames));
@@ -1665,16 +1690,32 @@ Begin your analysis now.` + JSON.stringify(compactGames);
         
         const m = mistakes.find(mm => Number(mm.moveNumber) >= 16);
         if (m) {
-          console.log(`  -> ✓ Found mistake in Game ${gnum}, Move ${m.moveNumber}: ${m.playerMove}`);
+          console.log(`  -> ✓ Found mistake in Game ${gnum}, Move ${m.moveNumber}: ${m.move || m.playerMove}`);
+          
+          // Get the user's actual move from the game index
+          const userMove = getUserMoveAt(gnum, m.moveNumber);
+          const playedMove = userMove?.san || m.move || m.playerMove;
+          const fenToUse = userMove?.fenBefore || m.previousFen || m.fen;
+          
+          // CRITICAL: Use Stockfish's best move from the mistake data
+          const stockfishBestMove = m.bestMove || '';
+          
+          if (!stockfishBestMove) {
+            console.log(`  -> Warning: No Stockfish best move in mistake data for Game ${gnum}, Move ${m.moveNumber}`);
+          } else {
+            console.log(`  -> ✓ Stockfish best move: ${stockfishBestMove}`);
+          }
+          
           out.push({
             gameNumber: gnum,
             moveNumber: m.moveNumber,
-            played: m.playerMove,
-            fen: m.fen,
+            played: playedMove, // User's actual move in SAN
+            fen: fenToUse, // Position BEFORE the user's move
             justification: w.description ? w.description.slice(0, 120) : 'From user mistake record',
             betterPlan: '',
-            betterMove: m.correctMove,
-            playerColor: gameIndex.get(gnum)?.playerColor || 'unknown'
+            betterMove: stockfishBestMove, // CRITICAL: Use ONLY Stockfish's top recommendation
+            playerColor: gameIndex.get(gnum)?.playerColor || 'unknown',
+            centipawnLoss: m.scoreDrop || 0
           });
           usedGames.add(gnum);
           console.log(`  -> Game ${gnum} marked as used. Used games now:`, Array.from(usedGames));
@@ -1694,15 +1735,30 @@ Begin your analysis now.` + JSON.stringify(compactGames);
         const userMove = getUserMoveAt(gnum, mv);
         if (userMove) {
           console.log(`  -> ✓ Fallback: Using Game ${gnum}, Move ${mv}: ${userMove.san}`);
+          
+          // Find the corresponding mistake to get Stockfish's best move
+          const mistakes = mistakesByGameNumber.get(gnum) || [];
+          const matchingMistake = mistakes.find(m => Number(m.moveNumber) === mv);
+          
+          // CRITICAL: Use Stockfish's best move, never Gemini's suggestion
+          const stockfishBestMove = matchingMistake?.bestMove || '';
+          
+          if (!stockfishBestMove) {
+            console.log(`  -> Warning: No Stockfish best move found for fallback Game ${gnum}, Move ${mv}`);
+          } else {
+            console.log(`  -> ✓ Stockfish best move: ${stockfishBestMove}`);
+          }
+          
           out.push({
             gameNumber: gnum,
             moveNumber: mv,
-            played: userMove.san,
-            fen: ex.fen || userMove.fenAfter,
+            played: userMove.san, // User's actual move
+            fen: userMove.fenBefore, // Position BEFORE the user's move
             justification: ex.justification || '',
             betterPlan: ex.betterPlan || '',
-            betterMove: ex.betterMove || '',
-            playerColor: gameIndex.get(gnum)?.playerColor || 'unknown'
+            betterMove: stockfishBestMove, // CRITICAL: Use ONLY Stockfish's top recommendation
+            playerColor: gameIndex.get(gnum)?.playerColor || 'unknown',
+            centipawnLoss: matchingMistake?.scoreDrop || 0
           });
           if (out.length >= 2) break;
         }
@@ -1730,6 +1786,101 @@ Begin your analysis now.` + JSON.stringify(compactGames);
     return uniq.slice(0, 3);
   };
 
+  // NEW: Enhance examples with Stockfish analysis + Gemini explanations
+  const enhanceExampleWithStockfishAndGemini = async (example, weaknessTitle) => {
+    try {
+      console.log(`\n🔍 Enhancing example: Game ${example.gameNumber}, Move ${example.moveNumber}`);
+      
+      // If we already have a betterMove from Stockfish, use it
+      if (!example.betterMove || !example.fen) {
+        console.log(`  ⚠️ Skipping: Missing betterMove or FEN`);
+        return example;
+      }
+
+      // Now ask Gemini to explain WHY this Stockfish move is best
+      const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+      if (!apiKey || apiKey === 'your_gemini_api_key_here') {
+        console.log(`  ⚠️ Skipping: No Gemini API key`);
+        return example;
+      }
+
+      const prompt = `You are a world-class chess coach explaining a position to a student.
+
+CONTEXT:
+- Weakness being addressed: "${weaknessTitle}"
+- Position (FEN): ${example.fen}
+- Player's color: ${example.playerColor}
+- Move played by student: ${example.played}
+- Stockfish's best move: ${example.betterMove}
+- Move number: ${example.moveNumber}
+
+TASK:
+Explain in 2-3 sentences:
+1. WHY the move "${example.betterMove}" is superior (what strategic/tactical idea does it accomplish?)
+2. What specific plan or advantage does it create?
+
+Return ONLY a JSON object with this exact structure:
+{
+  "justification": "Brief explanation of why the played move was inferior (1-2 sentences, reference specific squares and pieces)",
+  "betterPlan": "Explanation of why ${example.betterMove} is superior and what plan it enables (2-3 sentences, be specific about the strategic idea)"
+}
+
+CRITICAL RULES:
+- DO NOT suggest any additional moves beyond ${example.betterMove}
+- DO NOT use chess notation like Nf3, Qd5, etc. in your explanation EXCEPT when referring to ${example.betterMove} itself
+- Focus on CONCEPTS: "controls the center", "activates the rook", "improves piece coordination", "prevents counterplay"
+- Reference squares by name (e.g., "d5", "the kingside") but DO NOT suggest moves
+- Examples of GOOD explanations: "controls the critical d5 square", "activates the rook along the third rank", "prevents Black's counterplay on the queenside"
+- Examples of BAD explanations: "followed by Nf3 and Qd2" (suggesting additional moves), "then play Re1" (suggesting moves)
+
+STYLE:
+- Use sophisticated chess terminology
+- Reference specific squares, pieces, and strategic concepts
+- Be concise but insightful
+- Focus on the IDEA behind the move, not just "it's better"
+
+Return ONLY valid JSON, no additional text.`;
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.3, topP: 0.8, maxOutputTokens: 400 }
+        })
+      });
+
+      if (!response.ok) {
+        console.log(`  ❌ Gemini API error: ${response.status}`);
+        return example;
+      }
+
+      const data = await response.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      const start = text.indexOf('{');
+      const end = text.lastIndexOf('}');
+      
+      if (start < 0 || end <= start) {
+        console.log(`  ❌ No JSON in Gemini response`);
+        return example;
+      }
+
+      const parsed = JSON.parse(text.slice(start, end + 1));
+      
+      console.log(`  ✅ Enhanced with Gemini explanation`);
+      
+      return {
+        ...example,
+        justification: parsed.justification || example.justification,
+        betterPlan: parsed.betterPlan || example.betterPlan
+      };
+      
+    } catch (error) {
+      console.error(`  ❌ Failed to enhance example:`, error.message);
+      return example; // Return original if enhancement fails
+    }
+  };
+
   // 6) Map parsed JSON to your existing UI contract, using grounded examples
   const recurringWeaknesses = Array.isArray(parsed.recurringWeaknesses) ? parsed.recurringWeaknesses.slice(0, 3) : [];
 
@@ -1739,10 +1890,22 @@ Begin your analysis now.` + JSON.stringify(compactGames);
   console.log(`\n🎯 STARTING EXAMPLE GROUNDING FOR ${recurringWeaknesses.length} WEAKNESSES`);
   console.log(`Available games:`, compactGames.map(g => g.gameNumber));
   
-  const recurringWeaknessesSection = recurringWeaknesses.map((w, index) => {
+  // Process weaknesses and enhance examples with Stockfish + Gemini
+  const recurringWeaknessesSection = [];
+  for (let index = 0; index < recurringWeaknesses.length; index++) {
+    const w = recurringWeaknesses[index];
     console.log(`\n📋 Processing weakness ${index + 1}: "${w.title}"`);
     const grounded = groundExamples(w, globalUsedGames);
-    const top = grounded[0];
+    
+    // Enhance each example with Gemini explanations of Stockfish's best moves
+    console.log(`\n🚀 Enhancing ${grounded.length} examples with Stockfish + Gemini explanations...`);
+    const enhancedExamples = [];
+    for (const ex of grounded) {
+      const enhanced = await enhanceExampleWithStockfishAndGemini(ex, w.title);
+      enhancedExamples.push(enhanced);
+    }
+    
+    const top = enhancedExamples[0];
     
     const result = {
       title: w.title || 'Weakness',
@@ -1750,7 +1913,7 @@ Begin your analysis now.` + JSON.stringify(compactGames);
       category: categorizeWeaknessByContent(w.description || w.title || ''),
       opponentContext: null,
       example: top ? `Mistake: ${top.played || ''} (${top.justification || ''})\nBetter Plan: ${top.betterMove || ''} (${top.betterPlan || ''})` : null,
-      examples: grounded.map(ex => ({
+      examples: enhancedExamples.map(ex => ({
         gameNumber: ex.gameNumber,
         moveNumber: ex.moveNumber,
         played: ex.played,
@@ -1763,9 +1926,9 @@ Begin your analysis now.` + JSON.stringify(compactGames);
       actionPlan: generateActionPlanForWeakness(w.title, categorizeWeaknessByContent(w.description || w.title || ''))
     };
     
-    console.log(`✅ Weakness "${w.title}" processed with ${grounded.length} examples`);
-    return result;
-  });
+    console.log(`✅ Weakness "${w.title}" processed with ${enhancedExamples.length} enhanced examples`);
+    recurringWeaknessesSection.push(result);
+  }
   
   // Final validation: ensure no game is used in multiple weaknesses
   console.log(`\n🔍 FINAL VALIDATION: Checking for game diversity across weaknesses`);

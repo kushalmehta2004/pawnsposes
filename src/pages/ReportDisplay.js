@@ -10,6 +10,7 @@ import puzzleAccessService from '../services/puzzleAccessService';
 import { useAuth } from '../contexts/AuthContext';
 import UpgradePrompt from '../components/UpgradePrompt';
 import userProfileService from '../services/userProfileService';
+import { supabase } from '../services/supabaseClient';
 // Simple in-memory cache to persist report sections across route toggles (resets on reload)
 let REPORT_DISPLAY_CACHE = {
   key: null,
@@ -90,11 +91,10 @@ const ReportDisplay = () => {
       if (!username || username === 'Unknown') return;
       // ✅ PHASE 3: Extract userId and reportId for puzzle access control
       const userId = user?.id;
-      const reportId = analysisData?.reportId;
+      let reportId = analysisData?.reportId;
       
       // Add to analysisData for use in puzzle storage
       analysisData.userId = userId;
-      analysisData.reportId = reportId;
 
       // Check if puzzles were already generated for this user in this session
       if (REPORT_DISPLAY_CACHE.puzzlesGenerated.has(username)) {
@@ -108,6 +108,10 @@ const ReportDisplay = () => {
 
       // Set generating status to true
       setIsPuzzleGenerating(true);
+
+      // ✅ Puzzles will be saved to Supabase later in FullReport.js when reportId is created
+      // For now, just cache them in IndexedDB for immediate use
+ 
 
       // Disable prewarm cache for fix-weaknesses; only prewarm learn-mistakes if desired
       await initializePuzzleDatabase();
@@ -124,72 +128,119 @@ const ReportDisplay = () => {
         return;
       }
 
-      // Generate both sets; do not cache weaknesses
-      // MANDATORY: Generate at least 20 multi-move puzzles for "Learn From Mistakes"
-      console.log(`🧩 Starting puzzle generation for ${username}...`);
-      const [weakSet, learnSetRaw] = await Promise.all([
-        puzzleGenerationService.generateWeaknessPuzzles(username, { maxPuzzles: 20 }),
-        puzzleGenerationService.generateMistakePuzzles(username, { maxPuzzles: 20 })
+      // ✅ Generate ALL 4 puzzle types (30 puzzles each) for complete puzzle experience
+      console.log(`🧩 Starting comprehensive puzzle generation for ${username}...`);
+      console.log(`📊 Generating 30 puzzles per category (weakness, mistake, opening, endgame)`);
+      
+      const [weakSet, mistakeSet, openingSet, endgameSet] = await Promise.all([
+        puzzleGenerationService.generateWeaknessPuzzles(username, { maxPuzzles: 30 }),
+        puzzleGenerationService.generateMistakePuzzles(username, { maxPuzzles: 30 }),
+        puzzleGenerationService.generateOpeningPuzzles(username, { maxPuzzles: 30 }),
+        puzzleGenerationService.generateEndgamePuzzles({ maxPuzzles: 30 })
+       
       ]);
 
-      console.log(`📊 Generated ${learnSetRaw?.length || 0} mistake puzzles for ${username}`);
-
+      console.log(`📊 Generated puzzles:`, {
+        weakness: weakSet?.length || 0,
+        mistake: mistakeSet?.length || 0,
+        opening: openingSet?.length || 0,
+        endgame: endgameSet?.length || 0
+      });
       // Make learn-mistakes distinct from fix-weaknesses
       const tok = (s) => String(s || '').split(/\s+/).filter(Boolean);
       const keyOf = (p) => `${p.position}::${tok(p.lineUci).slice(0, 6).join(' ')}`;
       const weakKeys = new Set(Array.isArray(weakSet) ? weakSet.map(keyOf) : []);
-      const learnDistinct = Array.isArray(learnSetRaw) ? learnSetRaw.filter(p => !weakKeys.has(keyOf(p))) : [];
+      const learnDistinct = Array.isArray(mistakeSet) ? mistakeSet.filter(p => !weakKeys.has(keyOf(p))) : [];
 
-     // CRITICAL: Only cache if we have at least 20 puzzles
+      // ✅ Cache ALL 4 puzzle categories in IndexedDB (for consistency and reliability)
+      
+      // 1. Cache learn-mistakes (KEEP AS IS - WORKING PERFECTLY)
       if (learnDistinct.length >= 20) {
-        console.log(`💾 Caching ${learnDistinct.length} distinct mistake puzzles for ${username}`);
-
-        // Only cache learn-mistakes
         const metadata = {
           title: 'Learn From My Mistakes',
           subtitle: 'Puzzles from your mistakes',
           description: 'Practice positions created from your own mistakes.'
         };
         await db.saveSetting(keyFor('learn-mistakes'), { puzzles: learnDistinct, metadata, savedAt: Date.now() });
-        
-        console.log(`✅ Puzzle generation and caching complete for ${username} - ${learnDistinct.length} puzzles saved`);
-        // ✅ PHASE 3: Store puzzle metadata in Supabase for access control
-        const userId = analysisData?.userId;
-        const reportId = analysisData?.reportId;
-        
-        if (userId && reportId) {
-          try {
-            console.log('💾 Storing puzzle metadata in Supabase for access control...');
-            
-            // Combine all puzzles (weakness + mistake puzzles)
-            const allPuzzles = [...(Array.isArray(weakSet) ? weakSet : []), ...learnDistinct];
-            
-            // Store puzzles with access control (1 teaser per category)
-            await puzzleAccessService.storePuzzlesBatch(
+        console.log(`💾 Cached ${learnDistinct.length} mistake puzzles in IndexedDB`);
+      }
+
+      // 2. Cache weakness puzzles in IndexedDB
+      if (Array.isArray(weakSet) && weakSet.length >= 20) {
+        const metadata = {
+          title: 'Fix My Weaknesses',
+          subtitle: 'Puzzles targeting your weak areas',
+          description: 'Practice positions designed to improve your weaknesses.'
+        };
+        await db.saveSetting(keyFor('fix-weaknesses'), { puzzles: weakSet, metadata, savedAt: Date.now() });
+        console.log(`💾 Cached ${weakSet.length} weakness puzzles in IndexedDB`);
+      }
+
+      // 3. Cache opening puzzles in IndexedDB
+      if (Array.isArray(openingSet) && openingSet.length >= 20) {
+        const metadata = {
+          title: 'Master My Openings',
+          subtitle: 'Puzzles from your opening repertoire',
+          description: 'Practice critical positions from your openings.'
+        };
+        await db.saveSetting(keyFor('master-openings'), { puzzles: openingSet, metadata, savedAt: Date.now() });
+        console.log(`💾 Cached ${openingSet.length} opening puzzles in IndexedDB`);
+      }
+
+      // 4. Cache endgame puzzles in IndexedDB
+      if (Array.isArray(endgameSet) && endgameSet.length >= 20) {
+        const metadata = {
+          title: 'Sharpen My Endgame',
+          subtitle: 'Essential endgame positions',
+          description: 'Practice fundamental endgame techniques.'
+        };
+        await db.saveSetting(keyFor('sharpen-endgame'), { puzzles: endgameSet, metadata, savedAt: Date.now() });
+        console.log(`💾 Cached ${endgameSet.length} endgame puzzles in IndexedDB`);
+      }
+
+      // ✅ Puzzles are now cached in IndexedDB
+      console.log('✅ Puzzles cached in IndexedDB - now pushing to Supabase...');
+
+      // 🚀 Push puzzles to Supabase immediately (don't wait for FullReport)
+      try {
+        // Get the most recent report ID for this user
+        const { data: recentReport, error: reportError } = await supabase
+          .from('reports')
+          .select('id')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (reportError) {
+          console.warn('⚠️ No report found yet - puzzles will be saved when report is created');
+        } else if (recentReport?.id) {
+          // Collect all puzzles with category labels
+          const allPuzzles = [
+            ...(weakSet || []).map(p => ({ ...p, category: 'weakness', fen: p.fen || p.position })),
+            ...(mistakeSet || []).map(p => ({ ...p, category: 'mistake', fen: p.fen || p.position })),
+            ...(openingSet || []).map(p => ({ ...p, category: 'opening', fen: p.fen || p.position })),
+            ...(endgameSet || []).map(p => ({ ...p, category: 'endgame', fen: p.fen || p.position }))
+          ];
+
+          if (allPuzzles.length > 0) {
+            const puzzleAccessService = (await import('../services/puzzleAccessService')).default;
+            await puzzleAccessService.storePuzzlesBatchWithFullData(
               allPuzzles,
               userId,
-              reportId,
+              recentReport.id,
               1 // Number of teaser puzzles per category
             );
-            
-            console.log(`✅ Stored ${allPuzzles.length} puzzles in Supabase with access control`);
-          } catch (supabaseError) {
-            console.error('❌ Failed to store puzzles in Supabase:', supabaseError);
-            // Don't block the flow if Supabase storage fails
+            console.log(`✅ Pushed ${allPuzzles.length} puzzles to Supabase with report_id: ${recentReport.id}`);
           }
-        } else {
-          console.warn('⚠️ Missing userId or reportId - skipping Supabase puzzle storage');
         }
-
-        // Set generating status to false when complete
-        setIsPuzzleGenerating(false);
-      } else {
-        console.warn(`⚠️ Only generated ${learnDistinct.length} puzzles - NOT caching (need 20 minimum)`);
-        console.warn(`💡 Import more games to generate the full set of 20 puzzles`);
-        // Remove lock so it can be retried with more games
-        REPORT_DISPLAY_CACHE.puzzlesGenerated.delete(username);
-        setIsPuzzleGenerating(false);
+      } catch (supabaseError) {
+        console.error('❌ Failed to push puzzles to Supabase (non-blocking):', supabaseError);
+        // Don't block puzzle generation if Supabase save fails
       }
+
+      // Set generating status to false when complete
+      setIsPuzzleGenerating(false);
     } catch (e) {
       console.warn('⚠️ Background puzzle prewarm failed (continuing without blocking):', e);
       // Remove from cache on error so it can be retried
@@ -1821,18 +1872,51 @@ ANALYZE THE FEN POSITIONS CAREFULLY AND FIND REAL CHESS MISTAKES!`;
         }
         
         // Clean up mistake text (remove title, subtitle, and labels)
-        mistake = mistake
+        let mistakeText = mistake
           .replace(title, '') // Remove title repetition
           .replace(/SUBTITLE:.*?(?=,|\.|\n)/gi, '') // Remove SUBTITLE sections
           .replace(/GAME_INFO:.*?(?=MISTAKE:|$)/gs, '') // Remove GAME_INFO sections
           .replace(/MISTAKE:/gi, '') // Remove MISTAKE: labels
-          .replace(/\s+/g, ' ') // Normalize whitespace
+          .replace(/[ \t]+/g, ' ') // Normalize spaces and tabs (preserve newlines)
+          .replace(/\n\s*\n/g, '\n') // Remove empty lines but preserve line breaks
           .trim();
+         
+          // Extract game number and move number for structured data
+        let gameNumber = index + 1;
+        let moveNumber = '';
+        let moveNotation = '';
+        
+        // Try to extract move info from mistakeText - look for patterns like "17. f4" or "(f4)"
+        const movePatterns = [
+          /\(([a-hA-H]\d[a-hA-H]\d|[a-hA-H]\d|O-O(?:-O)?)\)/,  // (e4), (Nf3), (O-O), etc.
+          /(\d+)\.\s+([a-hA-H]\d[a-hA-H]\d|[a-hA-H]\d|[NBRQK][a-hA-H]\d[a-hA-H]\d|O-O(?:-O)?)/,  // 17. f4, etc.
+          /After\s+([a-hA-H]\d[a-hA-H]\d|[a-hA-H]\d|O-O(?:-O)?)/i  // After e4
+        ];
+        
+        for (const pattern of movePatterns) {
+          const match = mistakeText.match(pattern);
+          if (match) {
+            moveNotation = match[match.length - 1]; // Get the last capture group (the move)
+            break;
+          }
+        }
+        
+        // Try to extract move number from gameInfo or mistake
+        const moveMatch = gameInfo.match(/Move\s+(\d+)/);
+        if (moveMatch) {
+          moveNumber = moveMatch[1];
+          } else {
+          // Try to extract from mistake text like "Move 17" or "17."
+          const moveNumMatch = mistakeText.match(/(?:Move\s+)?(\d+)\.?\s+(?:[a-hA-H]\d|[NBRQK])/);
+          if (moveNumMatch) {
+            moveNumber = moveNumMatch[1];
+          }
+        }
         
         // Keep only the specific game example part (after the general description)
-        if (mistake.includes(',')) {
+        if (mistakeText.includes(',')) {
           // Split by comma and take the part that contains specific game details
-          const parts = mistake.split(',');
+          const parts = mistakeText.split(',');
           const gameSpecificPart = parts.find(part => 
             part.includes('after playing') || 
             part.includes('Move') || 
@@ -1840,18 +1924,29 @@ ANALYZE THE FEN POSITIONS CAREFULLY AND FIND REAL CHESS MISTAKES!`;
             part.includes('vs.')
           );
           if (gameSpecificPart) {
-            mistake = gameSpecificPart.trim();
+            mistakeText = gameSpecificPart.trim();
           }
         }
         
+
+        // Create a proper example object with required fields
+        const exampleObj = {
+          gameNumber: gameNumber,
+          moveNumber: moveNumber || '',
+          move: moveNotation,
+          explanation: mistakeText, // The 2-line justification
+          fen: '', // FEN not available in this legacy format
+          opponent: gameInfo.split('vs')[1]?.trim() || ''
+        };
+
         // Create weakness object
         const weakness = {
           title: title,
           subtitle: subtitle, // Use the extracted subtitle (2-line general description)
           gameInfo: gameInfo,
-          mistake: mistake, // Specific game example
+          mistake: mistakeText, // Specific game example
           betterPlan: betterPlan,
-          examples: [mistake]
+          examples: [exampleObj] // Store as object with structured fields
         };
         
         console.log(`📋 Parsed weakness ${index + 1}:`, {
@@ -3699,7 +3794,7 @@ Guidelines:
                       borderRadius: '4px',
                       fontWeight: '600'
                     }}>
-                      GENERATING
+                      
                     </span>
                   ) : (
                     (() => {
