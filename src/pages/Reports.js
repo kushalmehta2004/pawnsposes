@@ -197,6 +197,23 @@ const Reports = () => {
     setUserValidationStatus(null);
   };
 
+  const getSubscriptionDescription = () => {
+    const tier = (getSubscriptionTier() || '').toLowerCase();
+    if (tier.includes('annual')) {
+      return 'Weekly puzzle sets all year with automatic reports and priority features';
+    }
+    if (tier.includes('quarter')) {
+      return 'Weekly puzzle sets for twelve weeks with ongoing report downloads';
+    }
+    if (tier.includes('month')) {
+      return 'Weekly puzzle sets refreshed each week with downloadable reports';
+    }
+    if (tier.includes('one')) {
+      return 'One full week of unlocked puzzles linked to your latest report';
+    }
+    return 'Active subscription benefits enabled';
+  };
+
   // Removed duplicate validation functions - using gameDataService.validateUserOnPlatform instead
 
   /**
@@ -2283,7 +2300,7 @@ Keep examples concise and actionable.`;
                     <Lock className="w-5 h-5 text-orange-600" />
                     <div>
                       <p className="font-semibold text-gray-800">Free Report Used</p>
-                      <p className="text-sm text-gray-600">Subscribe to generate unlimited reports and access personalized puzzles</p>
+                      <p className="text-sm text-gray-600">Subscribe to unlock weekly puzzle drops and fresh reports</p>
                     </div>
                   </div>
                   <button
@@ -2320,7 +2337,7 @@ Keep examples concise and actionable.`;
                   <p className="text-sm text-gray-600">
                     {profile?.subscription_expires_at 
                       ? `Expires: ${new Date(profile.subscription_expires_at).toLocaleDateString()}`
-                      : 'Unlimited reports and personalized puzzles'}
+                      : getSubscriptionDescription()}
                   </p>
                 </div>
               </div>
