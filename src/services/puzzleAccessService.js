@@ -550,12 +550,32 @@ class PuzzleAccessService {
         });
       }
 
-      // Use upsert to handle duplicate puzzle_keys (update existing puzzles with new report_id)
+      const uniqueRecords = [];
+      const seenKeys = new Set();
+
+      for (const record of puzzleRecords) {
+        const key = `${record.user_id}-${record.puzzle_key}`;
+        if (seenKeys.has(key)) {
+          continue;
+        }
+        seenKeys.add(key);
+        uniqueRecords.push(record);
+      }
+
+      if (uniqueRecords.length === 0) {
+        console.warn('⚠️ No valid puzzles to store after deduplication');
+        return [];
+      }
+
+      if (uniqueRecords.length !== puzzleRecords.length) {
+        console.warn(`⚠️ Deduplicated ${puzzleRecords.length - uniqueRecords.length} duplicate puzzles in batch`);
+      }
+
       const { data, error } = await supabase
         .from('puzzles')
-        .upsert(puzzleRecords, {
-          onConflict: 'user_id,puzzle_key', // Unique constraint columns
-          ignoreDuplicates: false // Update existing records instead of ignoring
+        .upsert(uniqueRecords, {
+          onConflict: 'user_id,puzzle_key',
+          ignoreDuplicates: false
         })
         .select();
 

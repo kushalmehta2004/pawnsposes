@@ -55,34 +55,60 @@ class TierBasedPuzzleService {
    * @param {Array} puzzles - Array of puzzle records from Supabase
    * @returns {Promise<Object>} - { accessible: [], locked: [], teasers: [] }
    */
-  async filterPuzzlesByTier(userId, puzzles) {
+  async filterPuzzlesByTier(userId, puzzles, fallbackTier = null) {
     try {
-      // Get user's subscription
       const subscription = await subscriptionService.getSubscriptionStatus(userId);
-      const tier = subscription?.tier || 'free';
+      let tier = this._normalizeTier(subscription?.tier);
+      const normalizedFallback = fallbackTier && fallbackTier !== 'none' ? this._normalizeTier(fallbackTier) : null;
+
+      if ((!subscription || subscription.status !== 'active') && normalizedFallback && normalizedFallback !== 'free') {
+        tier = normalizedFallback;
+      }
+
+      if ((tier === 'free' || !tier) && normalizedFallback && normalizedFallback !== 'free') {
+        tier = normalizedFallback;
+      }
 
       console.log(`🎯 Filtering puzzles for user with tier: ${tier}`);
 
-      // Separate puzzles by type
-      const accessible = [];
-      const locked = [];
+      const isPremiumTier = ['monthly', 'quarterly', 'annual'].includes(tier);
+
+      if (isPremiumTier) {
+        const unlocked = puzzles.map((puzzle, index) => this._unlockPuzzleForTier(puzzle, tier, index));
+
+        return {
+          accessible: unlocked,
+          locked: [],
+          teasers: [],
+          tierInfo: {
+            tier,
+            tierConfig: this.TIER_CONFIG[tier],
+            subscription
+          }
+        };
+      }
+
+      let accessible = [];
+      let locked = [];
       const teasers = [];
-      
-      // For free users: automatically mark first puzzle as teaser
+
       let isFirstPuzzle = tier === 'free';
 
       for (const puzzle of puzzles) {
-        // Teasers are always accessible
         if (puzzle.is_teaser) {
-          teasers.push({
-            ...puzzle,
-            accessLevel: 'teaser',
-            canAccess: true
-          });
+          if (tier === 'free') {
+            teasers.push({
+              ...puzzle,
+              accessLevel: 'teaser',
+              canAccess: true
+            });
+            continue;
+          }
+
+          accessible.push(this._unlockPuzzleForTier(puzzle, tier));
           continue;
         }
 
-        // For free users: first puzzle becomes a teaser
         if (isFirstPuzzle && tier === 'free') {
           isFirstPuzzle = false;
           teasers.push({
@@ -90,20 +116,15 @@ class TierBasedPuzzleService {
             is_teaser: true,
             accessLevel: 'teaser',
             canAccess: true,
-            isTeaserPromo: true // Flag to distinguish from explicit teasers
+            isTeaserPromo: true
           });
           continue;
         }
 
-        // Check if user's tier can access non-teaser puzzles
         const canAccess = this._canAccessPuzzle(tier, puzzle, subscription);
 
         if (canAccess) {
-          accessible.push({
-            ...puzzle,
-            accessLevel: tier,
-            canAccess: true
-          });
+          accessible.push(this._unlockPuzzleForTier(puzzle, tier));
         } else {
           locked.push({
             ...puzzle,
@@ -113,10 +134,12 @@ class TierBasedPuzzleService {
         }
       }
 
+      const resultTeasers = tier === 'free' ? teasers : [];
+
       return {
-        accessible: [...teasers, ...accessible],
+        accessible: tier === 'free' ? [...resultTeasers, ...accessible] : accessible,
         locked,
-        teasers,
+        teasers: resultTeasers,
         tierInfo: {
           tier,
           tierConfig: this.TIER_CONFIG[tier],
@@ -142,7 +165,7 @@ class TierBasedPuzzleService {
 
       // Get subscription
       const subscription = await subscriptionService.getSubscriptionStatus(userId);
-      const tier = subscription?.tier || 'free';
+      const tier = this._normalizeTier(subscription?.tier);
 
       return this._canAccessPuzzle(tier, puzzle, subscription);
     } catch (error) {
@@ -159,7 +182,7 @@ class TierBasedPuzzleService {
   async getUnlockInfo(userId) {
     try {
       const subscription = await subscriptionService.getSubscriptionStatus(userId);
-      const tier = subscription?.tier || 'free';
+      const tier = this._normalizeTier(subscription?.tier);
 
       if (tier === 'free') {
         return {
@@ -193,7 +216,8 @@ class TierBasedPuzzleService {
       tierLocked: !this._isAccessibleByTier(userTier, puzzle),
       requiredTier: this._getRequiredTier(puzzle),
       isTeaser: puzzle.is_teaser,
-      lockReason: this._getLockReason(userTier, puzzle)
+      lockReason: this._getLockReason(userTier, puzzle),
+      canAccess: this._isAccessibleByTier(userTier, puzzle)
     }));
   }
 
@@ -275,22 +299,51 @@ class TierBasedPuzzleService {
 
   // ==================== PRIVATE METHODS ====================
 
+  _normalizeTier(tier) {
+    if (!tier) return 'free';
+    const value = tier.toString().toLowerCase();
+    if (value.includes('monthly')) return 'monthly';
+    if (value.includes('quarter')) return 'quarterly';
+    if (value.includes('annual') || value.includes('year')) return 'annual';
+    if (value.includes('one_time') || value.includes('one-time') || value.includes('one time')) return 'one_time';
+    if (value.includes('free')) return 'free';
+    return this.TIER_CONFIG[value] ? value : 'free';
+  }
+
+  _unlockPuzzleForTier(puzzle, tier, index = 0) {
+    return {
+      ...puzzle,
+      accessLevel: tier,
+      canAccess: true,
+      is_locked: false,
+      requires_subscription: false,
+      unlock_tier: tier,
+      is_teaser: false,
+      isTeaserPromo: false,
+      isTeaser: false,
+      index
+    };
+  }
+
   /**
    * Internal: Check if tier can access puzzle
    */
   _canAccessPuzzle(tier, puzzle, subscription) {
-    // Teasers accessible to all
     if (puzzle.is_teaser) return true;
 
-    // Free tier: only teasers
-    if (tier === 'free') return false;
+    const normalizedTier = (tier || 'free').toLowerCase();
 
-    // For weekly puzzles, check if within access window
-    if (tier === 'one_time' || tier === 'monthly' || tier === 'quarterly' || tier === 'annual') {
-      return this._isWithinAccessWindow(tier, puzzle, subscription);
+    if (normalizedTier === 'free') return false;
+
+    if (normalizedTier === 'monthly' || normalizedTier === 'quarterly' || normalizedTier === 'annual') {
+      return true;
     }
 
-    return false;
+    if (normalizedTier === 'one_time') {
+      return this._isWithinAccessWindow(normalizedTier, puzzle, subscription);
+    }
+
+    return true;
   }
 
   /**
@@ -332,7 +385,20 @@ class TierBasedPuzzleService {
    */
   _isAccessibleByTier(tier, puzzle) {
     if (puzzle.is_teaser) return true;
-    if (tier === 'free') return false;
+    if (!tier) return false;
+
+    const normalizedTier = tier.toLowerCase();
+
+    if (normalizedTier === 'free') return false;
+
+    if (normalizedTier === 'monthly' || normalizedTier === 'quarterly' || normalizedTier === 'annual') {
+      return true;
+    }
+
+    if (normalizedTier === 'one_time') {
+      return this._isWithinAccessWindow(normalizedTier, puzzle, null);
+    }
+
     return true;
   }
 

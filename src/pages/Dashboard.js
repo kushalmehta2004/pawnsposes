@@ -3,7 +3,7 @@
  * Displays past reports and all puzzle categories in a tabbed interface
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   FileText, 
@@ -86,6 +86,27 @@ const Dashboard = () => {
     endgame: { accessible: [], locked: [] }
   });
   
+  const normalizeTier = (tier) => {
+    if (!tier) return null;
+    const value = tier.toString().toLowerCase();
+    if (value.includes('one_time') || value.includes('one-time') || value.includes('one time')) return 'one_time';
+    if (value.includes('monthly') || value.includes('month')) return 'monthly';
+    if (value.includes('quarter') || value.includes('3month') || value.includes('3-month')) return 'quarterly';
+    if (value.includes('annual') || value.includes('year')) return 'annual';
+    if (value.includes('free')) return 'free';
+    return value;
+  };
+
+  const resolveTierFromProfile = useCallback(() => {
+    const fromHook = normalizeTier(getSubscriptionTier());
+    if (fromHook && fromHook !== 'none') return fromHook;
+    const fromProfile = normalizeTier(profile?.subscription_type);
+    if (fromProfile && fromProfile !== 'none') return fromProfile;
+    const altProfile = normalizeTier(profile?.subscription_tier);
+    if (altProfile && altProfile !== 'none') return altProfile;
+    return null;
+  }, [getSubscriptionTier, profile]);
+  
   const reportsPerPage = 10;
 
   // Tab configuration
@@ -109,25 +130,16 @@ const Dashboard = () => {
   }, [user]);
 
   useEffect(() => {
-    if (profileLoading) {
+    if (!user || profileLoading) {
       return;
     }
 
-    if (!profile) {
-      if (userTier !== 'free') {
-        setUserTier('free');
-      }
-      return;
-    }
+    const resolvedTier = resolveTierFromProfile() || 'free';
 
-    const notExpired = !profile.subscription_expires_at || new Date(profile.subscription_expires_at) > new Date();
-    const isActive = profile.subscription_status === 'active' && notExpired;
-    const tier = isActive ? profile.subscription_type || 'free' : 'free';
-
-    if (tier !== userTier) {
-      setUserTier(tier);
+    if (resolvedTier !== userTier) {
+      setUserTier(resolvedTier);
     }
-  }, [profile, profileLoading, userTier]);
+  }, [user, profile, profileLoading, getSubscriptionTier, userTier]);
 
   const loadReports = async () => {
     try {
@@ -147,6 +159,75 @@ const Dashboard = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!user || profileLoading) {
+      return;
+    }
+
+    if (
+      weaknessPuzzles.length === 0 &&
+      mistakePuzzles.length === 0 &&
+      openingPuzzles.length === 0 &&
+      endgamePuzzles.length === 0
+    ) {
+      return;
+    }
+
+    const applyTierFiltering = async () => {
+      try {
+        const fallbackTier = userTier && userTier !== 'none' ? userTier : resolveTierFromProfile();
+
+        const filteredByTier = await Promise.all([
+          tierBasedPuzzleService.filterPuzzlesByTier(user.id, weaknessPuzzles, fallbackTier),
+          tierBasedPuzzleService.filterPuzzlesByTier(user.id, mistakePuzzles, fallbackTier),
+          tierBasedPuzzleService.filterPuzzlesByTier(user.id, openingPuzzles, fallbackTier),
+          tierBasedPuzzleService.filterPuzzlesByTier(user.id, endgamePuzzles, fallbackTier)
+        ]);
+
+        const tierInfo = filteredByTier[0]?.tierInfo;
+        if (tierInfo) {
+          const resolvedTier = fallbackTier && fallbackTier !== 'none' ? fallbackTier : tierInfo.tier;
+          if (resolvedTier && resolvedTier !== userTier) {
+            setUserTier(resolvedTier);
+          }
+          console.log(`👤 User tier (refilter): ${resolvedTier || tierInfo.tier}`);
+        }
+
+        setPuzzlesWithTier({
+          weakness: {
+            accessible: filteredByTier[0]?.accessible || [],
+            locked: filteredByTier[0]?.locked || []
+          },
+          mistake: {
+            accessible: filteredByTier[1]?.accessible || [],
+            locked: filteredByTier[1]?.locked || []
+          },
+          opening: {
+            accessible: filteredByTier[2]?.accessible || [],
+            locked: filteredByTier[2]?.locked || []
+          },
+          endgame: {
+            accessible: filteredByTier[3]?.accessible || [],
+            locked: filteredByTier[3]?.locked || []
+          }
+        });
+      } catch (error) {
+        console.error('⚠️ Error applying tier filters:', error);
+      }
+    };
+
+    applyTierFiltering();
+  }, [
+    user,
+    profileLoading,
+    userTier,
+    resolveTierFromProfile,
+    weaknessPuzzles,
+    mistakePuzzles,
+    openingPuzzles,
+    endgamePuzzles
+  ]);
 
   const loadStats = async () => {
     try {
@@ -224,18 +305,23 @@ const Dashboard = () => {
       
       // ✅ Apply tier-based filtering
       try {
+        const fallbackTier = resolveTierFromProfile();
+
         const filteredByTier = await Promise.all([
-          tierBasedPuzzleService.filterPuzzlesByTier(user.id, extractedWeakness),
-          tierBasedPuzzleService.filterPuzzlesByTier(user.id, extractedMistake),
-          tierBasedPuzzleService.filterPuzzlesByTier(user.id, extractedOpening),
-          tierBasedPuzzleService.filterPuzzlesByTier(user.id, extractedEndgame)
+          tierBasedPuzzleService.filterPuzzlesByTier(user.id, extractedWeakness, fallbackTier),
+          tierBasedPuzzleService.filterPuzzlesByTier(user.id, extractedMistake, fallbackTier),
+          tierBasedPuzzleService.filterPuzzlesByTier(user.id, extractedOpening, fallbackTier),
+          tierBasedPuzzleService.filterPuzzlesByTier(user.id, extractedEndgame, fallbackTier)
         ]);
 
         // Extract tier info from first result
         const tierInfo = filteredByTier[0]?.tierInfo;
         if (tierInfo) {
-          setUserTier(tierInfo.tier);
-          console.log(`👤 User tier: ${tierInfo.tier}`);
+          const resolvedTier = fallbackTier && fallbackTier !== 'none' ? fallbackTier : tierInfo.tier;
+          if (resolvedTier && resolvedTier !== userTier) {
+            setUserTier(resolvedTier);
+          }
+          console.log(`👤 User tier: ${resolvedTier || tierInfo.tier}`);
         }
 
         // Set accessible and locked puzzles by category
