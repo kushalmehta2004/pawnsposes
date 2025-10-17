@@ -709,14 +709,36 @@ EXPLANATION STYLE: Use precise chess terminology. Include deep strategic and tac
 
     if (!canGenerate && !hasSubscription) {
       toast.error('You have already used your free report. Please subscribe to generate more reports.');
-      // TODO: Navigate to pricing page when implemented in Phase 4
       return;
     }
 
-    // Disable all inputs immediately when form is submitted
+    try {
+      const latestReport = await reportService.getLatestUserReport(user.id);
+      if (latestReport?.created_at) {
+        const lastCreatedAt = new Date(latestReport.created_at);
+        const now = new Date();
+        const weekInMs = 7 * 24 * 60 * 60 * 1000;
+        if (now.getTime() - lastCreatedAt.getTime() < weekInMs) {
+          const nextAvailableAt = new Date(lastCreatedAt.getTime() + weekInMs);
+          const formattedDate = nextAvailableAt.toLocaleString(undefined, {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+          toast.error(`You can generate your next report on ${formattedDate}.`);
+          return;
+        }
+      }
+    } catch (availabilityError) {
+      console.error('Error checking report availability:', availabilityError);
+      toast.error('Unable to verify report availability. Please try again later.');
+      return;
+    }
+
     setIsLoading(true);
     
-    // Start the combined progress flow
     setProgressStage('fetching');
     setProgressPercent(5);
     setCurrentStep(0);

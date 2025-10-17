@@ -219,7 +219,6 @@ class ReportService {
 
       if (error) throw error;
 
-      // Decompress analysis_data if compressed (for legacy JSON reports)
       const reports = data.map(report => {
         if (report.analysis_data && typeof report.analysis_data === 'object' && report.analysis_data.compressed) {
           const decompressed = decompress(this._decodeBase64(report.analysis_data.data));
@@ -231,6 +230,39 @@ class ReportService {
       return reports;
     } catch (error) {
       console.error('❌ Failed to get user reports:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the most recent report for a user
+   * @param {string} userId - User ID
+   * @returns {Promise<Object|null>} - Latest report or null
+   */
+  async getLatestUserReport(userId) {
+    try {
+      const { data, error } = await supabase
+        .from('reports')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (!data) {
+        return null;
+      }
+
+      if (data.analysis_data && typeof data.analysis_data === 'object' && data.analysis_data.compressed) {
+        const decompressed = decompress(this._decodeBase64(data.analysis_data.data));
+        data.analysis_data = JSON.parse(decompressed);
+      }
+
+      return data;
+    } catch (error) {
+      console.error('❌ Failed to get latest user report:', error);
       throw error;
     }
   }
@@ -250,7 +282,6 @@ class ReportService {
 
       if (error) throw error;
 
-      // Decompress analysis_data if compressed
       if (data.analysis_data && data.analysis_data.compressed) {
         const decompressed = decompress(this._decodeBase64(data.analysis_data.data));
         data.analysis_data = JSON.parse(decompressed);
