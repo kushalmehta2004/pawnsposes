@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { motion } from 'framer-motion';
+
 import { Loader2, ArrowLeft, Eye, EyeOff, RotateCcw, Undo2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Chess } from 'chess.js';
@@ -27,7 +27,6 @@ const PuzzlePage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [puzzleMetadata, setPuzzleMetadata] = useState(null);
   const [orientation, setOrientation] = useState('white');
-  const [resetCounter, setResetCounter] = useState(0);
   const [difficulty, setDifficulty] = useState('easy');
   const [fullPuzzles, setFullPuzzles] = useState([]);
   const [canAccess, setCanAccess] = useState(true);
@@ -78,13 +77,13 @@ const PuzzlePage = () => {
     }
   }, [canAccess, fullPuzzles]);
 
-  // Keep board orientation in sync with current FEN while puzzle is active
+  // Set board orientation based on initial FEN when puzzle changes
   useEffect(() => {
-    if (puzzle?.completed) return; // don't flip after completion
-    const fen = puzzle?.position || puzzle?.initialPosition;
-    const side = (fen && fen.split(' ')[1] === 'b') ? 'black' : 'white';
-    setOrientation(side);
-  }, [currentPuzzle, puzzles]);
+    if (puzzle?.initialPosition) {
+      const side = puzzle.initialPosition.split(' ')[1] === 'b' ? 'black' : 'white';
+      setOrientation(side);
+    }
+  }, [currentPuzzle]);
 
   // For learn-mistakes, show all puzzles without difficulty filtering
   useEffect(() => {
@@ -499,13 +498,15 @@ const PuzzlePage = () => {
     setFeedback('');
     setSolutionText('');
     setShowSolution(false);
+    
+    // Get the initial position before updating state
+    const initialPos = puzzles[currentPuzzle]?.initialPosition || puzzles[currentPuzzle]?.position;
+    const startLineIdx = typeof puzzles[currentPuzzle]?.startLineIndex === 'number' ? puzzles[currentPuzzle].startLineIndex : 0;
+    const side = (initialPos || '').split(' ')[1] === 'b' ? 'black' : 'white';
+    
     // Reset current puzzle to its initial FEN and its original starting line index
-    setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: pz.initialPosition, lineIndex: (typeof pz.startLineIndex === 'number' ? pz.startLineIndex : 0), completed: false } : pz));
-    // Orientation from the reset position
-    const side = (puzzles[currentPuzzle]?.initialPosition || puzzles[currentPuzzle]?.position || '').split(' ')[1] === 'b' ? 'black' : 'white';
+    setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: initialPos, lineIndex: startLineIdx, completed: false } : pz));
     setOrientation(side);
-    // Force Chessboard to re-mount by changing a key
-    setResetCounter((c) => c + 1);
   };
 
   // Step back exactly one user turn (rewind to previous user move in the PV)
@@ -544,8 +545,6 @@ const PuzzlePage = () => {
       setShowSolution(false);
       setPuzzles(prev => prev.map((pz2, i) => i === currentPuzzle ? { ...pz2, position: newFen, lineIndex: targetIdx, completed: false } : pz2));
       setOrientation(side);
-      // Force re-mount to clear any drag state
-      setResetCounter((c) => c + 1);
     } catch (_) {
       // no-op on failure
     }
@@ -711,14 +710,8 @@ const PuzzlePage = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Side - Chessboard (60-70% width on desktop) */}
           <div className="lg:col-span-2">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6 }}
-              className="bg-white rounded-lg shadow-lg p-6"
-            >
+            <div className="bg-white rounded-lg shadow p-6">
               <Chessboard 
-                key={`${currentPuzzle}-${resetCounter}`}
                 position={puzzle.position}
                 orientation={orientation}
                 enableArrows
@@ -756,35 +749,55 @@ const PuzzlePage = () => {
                         // Apply the user's correct move
                         engine.move({ from, to, promotion: (san.match(/=([QRBN])/i)?.[1] || 'q').toLowerCase() });
                         let nextIdx = curIdx + 1;
-                        // Auto-play opponent reply if present
+                        
+                        // STEP 1: Update position with user's move immediately (smooth animation via Chessboard)
+                        const positionAfterUserMove = engine.fen();
+                        setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: positionAfterUserMove, lineIndex: nextIdx } : pz));
+                        setFeedback(`Good move: ${san}. Keep going!`);
+                        
+                        // STEP 2: Auto-play opponent reply if present, after a delay for smooth animation
                         const replyUci = tokens[nextIdx];
                         if (replyUci && /^[a-h][1-8][a-h][1-8](?:[qrbn])?$/i.test(replyUci)) {
-                          const rFrom = replyUci.slice(0, 2);
-                          const rTo = replyUci.slice(2, 4);
-                          const rProm = replyUci.length > 4 ? replyUci[4] : undefined;
-                          engine.move({ from: rFrom, to: rTo, promotion: rProm });
-                          nextIdx += 1;
-                        }
-                        const newFen = engine.fen();
-                        const isDone = nextIdx >= tokens.length;
-                        setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: newFen, lineIndex: nextIdx, completed: isDone } : pz));
-                        if (!isDone) {
-                          const side = newFen.split(' ')[1] === 'b' ? 'black' : 'white';
-                          setOrientation(side);
-                        }
-                        if (isDone) {
-                          setFeedback('🎉 Congratulations! You completed the puzzle.');
+                          setTimeout(() => {
+                            try {
+                              const engine2 = new Chess(positionAfterUserMove);
+                              const rFrom = replyUci.slice(0, 2);
+                              const rTo = replyUci.slice(2, 4);
+                              const rProm = replyUci.length > 4 ? replyUci[4] : undefined;
+                              engine2.move({ from: rFrom, to: rTo, promotion: rProm });
+                              const finalFen = engine2.fen();
+                              const finalIdx = nextIdx + 1;
+                              const isDone = finalIdx >= tokens.length;
+                              setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: finalFen, lineIndex: finalIdx, completed: isDone } : pz));
+                              if (isDone) {
+                                setFeedback('🎉 Congratulations! You completed the puzzle.');
+                              }
+                            } catch (_) {
+                              // If auto-move fails, just keep the position after user move
+                            }
+                          }, 350); // Wait 350ms for user's move animation to complete before opponent moves
                         } else {
-                          setFeedback(`Good move: ${san}. Keep going!`);
+                          // No opponent reply, check if we're done
+                          const isDone = nextIdx >= tokens.length;
+                          if (isDone) {
+                            setFeedback('🎉 Congratulations! You completed the puzzle.');
+                            setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, completed: true } : pz));
+                          }
                         }
                       } catch (_) {
                         // If anything fails, do not advance
                       }
                     } else {
+                      // WRONG MOVE: Still update position so reset can work properly
+                      // But don't advance lineIndex
+                      setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: fen } : pz));
                       setFeedback(`Not quite. You played ${san}. Try again or show a hint.`);
                     }
                   } else {
                     // Fallback: single-move correctness based on provided solution
+                    // Always update position so reset works
+                    setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: fen, completed: false } : pz));
+                    
                     const correct = (targetSan && playedSan === targetSan) || (targetUci && playedUci === targetUci);
                     if (correct) {
                       setFeedback(`Correct! ${san} is the best move.`);
@@ -797,15 +810,12 @@ const PuzzlePage = () => {
                 }}
                 showCoordinates
               />
-            </motion.div>
+            </div>
           </div>
 
           {/* Right Side - Analysis Panel (30-40% width on desktop) */}
           <div className="lg:col-span-1">
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.6, delay: 0.2 }}
+            <div
               className="bg-white rounded-lg shadow-lg p-6 h-fit"
             >
               {/* Title */}
@@ -944,7 +954,7 @@ const PuzzlePage = () => {
                   <UpgradePrompt title="Unlock All Puzzles in This Set" description="Subscribe or buy a one-time pack to access the full personalized puzzle set generated from your games." />
                 </div>
               )}
-            </motion.div>
+            </div>
           </div>
         </div>
       </div>

@@ -381,6 +381,26 @@ const Chessboard = ({
 
   const pieceImgBaseStyle = { width: `${pieceSize}px`, height: `${pieceSize}px`, userSelect: 'none', pointerEvents: 'none' };
 
+  // Add smooth animation styles to document if not already present
+  useEffect(() => {
+    const styleId = 'piece-animation-styles';
+    if (!document.getElementById(styleId)) {
+      const style = document.createElement('style');
+      style.id = styleId;
+      style.textContent = `
+        @keyframes smoothPieceMove {
+          from {
+            transform: translate(var(--from-x), var(--from-y));
+          }
+          to {
+            transform: translate(var(--to-x), var(--to-y));
+          }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+  }, []);
+
   const filesTop = showCoordinates ? files : [];
   const ranksLeft = showCoordinates ? ranks : [];
   const ranksRight = showCoordinates ? ranks : [];
@@ -440,7 +460,9 @@ const Chessboard = ({
                 ...pieceImgBaseStyle,
                 position: 'absolute',
                 transform: `translate(${x}px, ${y}px)`,
-                transition: suppressTransitions ? 'none' : 'transform 220ms ease',
+                // Smooth Lichess-style animation: longer duration + cubic-bezier easing
+                transition: suppressTransitions ? 'none' : 'transform 300ms cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+                willChange: 'transform', // GPU acceleration hint
               };
               return (
                 <img key={p.id} src={pieceSrcFor(code)} alt={code} style={pieceStyle} />
