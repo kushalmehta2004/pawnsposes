@@ -102,12 +102,32 @@ const Dashboard = () => {
     if (user) {
       loadReports();
       loadStats();
-      // Only load puzzles if not already cached for this user
       if (!hasCachedPuzzles(user.id)) {
         loadPuzzles();
       }
     }
   }, [user]);
+
+  useEffect(() => {
+    if (profileLoading) {
+      return;
+    }
+
+    if (!profile) {
+      if (userTier !== 'free') {
+        setUserTier('free');
+      }
+      return;
+    }
+
+    const notExpired = !profile.subscription_expires_at || new Date(profile.subscription_expires_at) > new Date();
+    const isActive = profile.subscription_status === 'active' && notExpired;
+    const tier = isActive ? profile.subscription_type || 'free' : 'free';
+
+    if (tier !== userTier) {
+      setUserTier(tier);
+    }
+  }, [profile, profileLoading, userTier]);
 
   const loadReports = async () => {
     try {
