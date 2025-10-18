@@ -142,9 +142,15 @@ class PuzzleGenerationService {
   /**
    * Generate puzzles for "Learn From My Mistakes" based on actual game positions
    * MANDATORY: Generate EXACTLY 20 multi-move puzzles (minimum 4 plies each)
+   * 
+   * @param {string} username - Username to generate puzzles for
+   * @param {object} options - Options object
+   * @param {number} options.maxPuzzles - Maximum puzzles to generate (default 20)
+   * @param {string} options.difficulty - Difficulty level (default 'intermediate')
+   * @param {function} options.onProgress - Callback(puzzle, index, total) called after each puzzle is generated
    */
   async generateMistakePuzzles(username, options = {}) {
-    const { maxPuzzles = 20, difficulty = 'intermediate' } = options;
+    const { maxPuzzles = 20, difficulty = 'intermediate', onProgress = null } = options;
     const EXACT_PUZZLES = 20;  // EXACTLY 20 puzzles, no more, no less
     const MINIMUM_PLIES = 10;  // 5 full moves minimum (5 user decisions) - high-quality long tactical puzzles
     const TARGET_PLIES = 16;   // Target 8 full moves for maximum tactical depth
@@ -309,6 +315,15 @@ class PuzzleGenerationService {
             enhanced.push(result.value);
             console.log(`✅ Generated long puzzle ${enhanced.length}/${EXACT_PUZZLES} with ${result.value.plies} plies (${result.value.userDecisions} user decisions)`);
             
+            // Call progress callback for real-time caching
+            if (onProgress && typeof onProgress === 'function') {
+              try {
+                onProgress(result.value, enhanced.length, EXACT_PUZZLES);
+              } catch (err) {
+                console.warn('⚠️ Error in onProgress callback:', err);
+              }
+            }
+            
             // STOP IMMEDIATELY when we reach exactly EXACT_PUZZLES
             if (enhanced.length >= EXACT_PUZZLES) {
               break;
@@ -387,6 +402,16 @@ class PuzzleGenerationService {
               if (result.status === 'fulfilled' && result.value) {
                 enhanced.push(result.value);
                 console.log(`✅ Generated puzzle ${enhanced.length}/${EXACT_PUZZLES} with ${result.value.plies} plies (${result.value.userDecisions} decisions) [${result.value.adaptiveStrategy}]`);
+                
+                // Call progress callback for real-time caching
+                if (onProgress && typeof onProgress === 'function') {
+                  try {
+                    onProgress(result.value, enhanced.length, EXACT_PUZZLES);
+                  } catch (err) {
+                    console.warn('⚠️ Error in onProgress callback:', err);
+                  }
+                }
+                
                 if (enhanced.length >= EXACT_PUZZLES) break;
               }
             }

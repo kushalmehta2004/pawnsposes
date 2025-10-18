@@ -130,11 +130,41 @@ const ReportDisplay = () => {
 
       // ✅ Generate ALL 4 puzzle types (30 puzzles each) for complete puzzle experience
       console.log(`🧩 Starting comprehensive puzzle generation for ${username}...`);
-      console.log(`📊 Generating 30 puzzles per category (weakness, mistake, opening, endgame)`);
+      console.log(`📊 Generating puzzles per category (weakness, opening, endgame and learn-mistakes)...`);
       
+      // Initialize cache list for learn-mistakes puzzles (will be updated in real-time)
+      const learnMistakesCache = [];
+      const metadata = {
+        title: 'Learn From My Mistakes',
+        subtitle: 'Puzzles from your mistakes',
+        description: 'Practice positions created from your own mistakes.'
+      };
+
+      // Callback function for learn-mistakes real-time caching
+      const onMistakeProgress = async (puzzle, index, total) => {
+        try {
+          learnMistakesCache.push(puzzle);
+          console.log(`💾 Cached puzzle ${index}/${total} in IndexedDB`);
+          
+          // Save incrementally to IndexedDB for immediate availability
+          await db.saveSetting(keyFor('learn-mistakes'), { 
+            puzzles: learnMistakesCache, 
+            metadata, 
+            savedAt: Date.now(),
+            inProgress: index < total  // Track if generation is still ongoing
+          });
+        } catch (err) {
+          console.warn('⚠️ Error caching puzzle:', err);
+        }
+      };
+
+      // Generate puzzles with real-time caching for learn-mistakes
       const [weakSet, mistakeSet, openingSet, endgameSet] = await Promise.all([
         puzzleGenerationService.generateWeaknessPuzzles(username, { maxPuzzles: 30 }),
-        puzzleGenerationService.generateMistakePuzzles(username, { maxPuzzles: 30 }),
+         puzzleGenerationService.generateMistakePuzzles(username, { 
+          maxPuzzles: 30,
+          onProgress: onMistakeProgress  // Real-time caching callback
+        }),
         puzzleGenerationService.generateOpeningPuzzles(username, { maxPuzzles: 30 }),
         puzzleGenerationService.generateEndgamePuzzles({ maxPuzzles: 30 })
        
@@ -146,24 +176,30 @@ const ReportDisplay = () => {
         opening: openingSet?.length || 0,
         endgame: endgameSet?.length || 0
       });
-      // Make learn-mistakes distinct from fix-weaknesses
+      // ✅ Mark learn-mistakes generation as complete in IndexedDB
+      if (learnMistakesCache.length > 0) {
+        try {
+          await db.saveSetting(keyFor('learn-mistakes'), { 
+            puzzles: learnMistakesCache, 
+            metadata, 
+            savedAt: Date.now(),
+            inProgress: false  // Generation complete!
+          });
+          console.log(`✅ Finalized ${learnMistakesCache.length} Learn From Mistakes puzzles in cache`);
+        } catch (err) {
+          console.warn('⚠️ Error finalizing learn-mistakes cache:', err);
+        }
+      }
+      
+      // Make learn-mistakes distinct from fix-weaknesses (for other puzzle types)
+     
       const tok = (s) => String(s || '').split(/\s+/).filter(Boolean);
       const keyOf = (p) => `${p.position}::${tok(p.lineUci).slice(0, 6).join(' ')}`;
       const weakKeys = new Set(Array.isArray(weakSet) ? weakSet.map(keyOf) : []);
       const learnDistinct = Array.isArray(mistakeSet) ? mistakeSet.filter(p => !weakKeys.has(keyOf(p))) : [];
 
-      // ✅ Cache ALL 4 puzzle categories in IndexedDB (for consistency and reliability)
-      
-      // 1. Cache learn-mistakes (KEEP AS IS - WORKING PERFECTLY)
-      if (learnDistinct.length >= 20) {
-        const metadata = {
-          title: 'Learn From My Mistakes',
-          subtitle: 'Puzzles from your mistakes',
-          description: 'Practice positions created from your own mistakes.'
-        };
-        await db.saveSetting(keyFor('learn-mistakes'), { puzzles: learnDistinct, metadata, savedAt: Date.now() });
-        console.log(`💾 Cached ${learnDistinct.length} mistake puzzles in IndexedDB`);
-      }
+      // ✅ Cache OTHER puzzle categories in IndexedDB (weakness, opening, endgame)
+      // NOTE: learn-mistakes is already cached in real-time above
 
       // 2. Cache weakness puzzles in IndexedDB
       if (Array.isArray(weakSet) && weakSet.length >= 20) {
@@ -199,9 +235,14 @@ const ReportDisplay = () => {
       }
 
       // ✅ Puzzles are now cached in IndexedDB
-      console.log('✅ Puzzles cached in IndexedDB - now pushing to Supabase...');
+      console.log('✅ Puzzles cached in IndexedDB');
+      
+      // 💡 NOTE: Learn From Mistakes puzzles are cached locally only (no Supabase dependency)
+      // They're ready for immediate use from the cache!
 
-      // 🚀 Push puzzles to Supabase immediately (don't wait for FullReport)
+      // 🚀 Push OTHER puzzle categories to Supabase (weakness, opening, endgame)
+      // Learn-mistakes is NOT pushed to Supabase - it's cache-only for instant access
+      
       try {
         // Get the most recent report ID for this user
         const { data: recentReport, error: reportError } = await supabase
@@ -218,7 +259,7 @@ const ReportDisplay = () => {
           // Collect all puzzles with category labels
           const allPuzzles = [
             ...(weakSet || []).map(p => ({ ...p, category: 'weakness', fen: p.fen || p.position })),
-            ...(mistakeSet || []).map(p => ({ ...p, category: 'mistake', fen: p.fen || p.position })),
+            ...(learnDistinct || []).map(p => ({ ...p, category: 'learn-mistakes', fen: p.fen || p.position })),
             ...(openingSet || []).map(p => ({ ...p, category: 'opening', fen: p.fen || p.position })),
             ...(endgameSet || []).map(p => ({ ...p, category: 'endgame', fen: p.fen || p.position }))
           ];

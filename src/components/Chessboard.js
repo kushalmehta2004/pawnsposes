@@ -16,7 +16,8 @@ const Chessboard = ({
   showCoordinates = true,
   enableArrows = true,   // enable right-click drawing
   preserveDrawingsOnPositionChange = false, // keep drawings when position updates
-  onDrawChange           // optional callback({ arrows, circles })
+  onDrawChange,          // optional callback({ arrows, circles })
+  moveResult = null      // { square, isCorrect } - shows checkmark/X on destination square
 }) => {
   // Internal chess engine for legal moves and updates
   const [selectedSquare, setSelectedSquare] = useState(null);
@@ -97,6 +98,11 @@ const Chessboard = ({
 
   const onSquareClick = (row, col) => {
     const square = squareFromRowCol(row, col);
+
+    // Clear any drawn arrows and circles on left-click
+    setDrawnArrows([]);
+    setDrawnCircles([]);
+    if (onDrawChange) onDrawChange({ arrows: [], circles: [] });
 
     // If selecting own piece, show legal moves
     const piece = chess.get(square);
@@ -480,6 +486,66 @@ const Chessboard = ({
                 const r = Math.max(6, pieceSize * 0.18);
                 return <circle key={idx} cx={cx} cy={cy} r={r} fill="rgba(0,0,0,0.35)" />;
               })}
+            </svg>
+          )}
+
+          {/* Move Result Feedback - Checkmark/X overlay */}
+          {moveResult && (
+            <svg width={squareSize * 8} height={squareSize * 8} style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}>
+              {(() => {
+                const { x, y } = squareToXY(moveResult.square);
+                // Position at top-right corner of piece
+                const cx = x + pieceSize - 7;
+                const cy = y + 7;
+                const radius = 12;
+                const strokeWidth = 2;
+                
+                if (moveResult.isCorrect) {
+                  // Green checkmark
+                  return (
+                    <g>
+                      {/* Circular background */}
+                      <circle cx={cx} cy={cy} r={radius} fill="#22c55e" opacity="0.95" />
+                      {/* Checkmark */}
+                      <path
+                        d={`M ${cx - 4} ${cy - 1} L ${cx - 1} ${cy + 3} L ${cx + 5} ${cy - 3}`}
+                        stroke="white"
+                        strokeWidth={strokeWidth}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        fill="none"
+                      />
+                    </g>
+                  );
+                } else {
+                  // Red X mark
+                  return (
+                    <g>
+                      {/* Circular background */}
+                      <circle cx={cx} cy={cy} r={radius} fill="#ef4444" opacity="0.95" />
+                      {/* X mark */}
+                      <line
+                        x1={cx - 3.5}
+                        y1={cy - 3.5}
+                        x2={cx + 3.5}
+                        y2={cy + 3.5}
+                        stroke="white"
+                        strokeWidth={strokeWidth}
+                        strokeLinecap="round"
+                      />
+                      <line
+                        x1={cx + 3.5}
+                        y1={cy - 3.5}
+                        x2={cx - 3.5}
+                        y2={cy + 3.5}
+                        stroke="white"
+                        strokeWidth={strokeWidth}
+                        strokeLinecap="round"
+                      />
+                    </g>
+                  );
+                }
+              })()}
             </svg>
           )}
 

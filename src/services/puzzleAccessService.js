@@ -427,6 +427,52 @@ class PuzzleAccessService {
   }
 
   /**
+   * Helper: Normalize difficulty value to match Supabase constraint
+   * @private
+   */
+  _normalizeDifficulty(rawDifficulty, puzzle = {}, category = '') {
+    const allowed = ['beginner', 'easy', 'medium', 'hard', 'expert'];
+    const normalized = String(rawDifficulty || '').toLowerCase().trim();
+
+    if (allowed.includes(normalized)) {
+      return normalized;
+    }
+
+    // Try to map custom difficulty labels
+    const aliasMap = {
+      'advanced': 'hard',
+      'intermediate': 'medium',
+      'extreme': 'expert',
+      'challenging': 'hard',
+      'novice': 'beginner',
+      'easy-medium': 'medium',
+      'medium-hard': 'hard'
+    };
+
+    if (normalized && aliasMap[normalized]) {
+      return aliasMap[normalized];
+    }
+
+    // Fallback to difficulty derived from rating if available
+    const numericRating = puzzle?.estimatedRating || puzzle?.rating || puzzle?.rating_estimate || null;
+    if (numericRating) {
+      if (numericRating < 900) return 'beginner';
+      if (numericRating < 1300) return 'easy';
+      if (numericRating < 1700) return 'medium';
+      if (numericRating < 2100) return 'hard';
+      return 'expert';
+    }
+
+    // As a safe default, align mistake puzzles to 'hard'
+    if (category === 'mistake') {
+      return 'hard';
+    }
+
+    // Default fallback to medium
+    return 'medium';
+  }
+
+  /**
    * Helper: Estimate rating based on difficulty level
    * @private
    */
@@ -513,35 +559,47 @@ class PuzzleAccessService {
       // Mark first N puzzles per category as teasers
       const puzzleRecords = [];
       
-      for (const [category, categoryPuzzles] of Object.entries(puzzlesByCategory)) {
+      for (const [categoryKey, categoryPuzzles] of Object.entries(puzzlesByCategory)) {
         categoryPuzzles.forEach((puzzle, index) => {
+          const normalizedCategory = (puzzle.category || categoryKey || '').toLowerCase();
+          const category = normalizedCategory === 'learn-mistakes' ? 'mistake' : normalizedCategory;
           const isTeaser = index < teaserCount;
-          
+
           // Extract FEN from either 'fen' or 'position' field
           const fenValue = puzzle.fen || puzzle.position;
-          
+
           // Skip puzzles without a valid FEN
           if (!fenValue) {
             console.warn('⚠️ Skipping puzzle without FEN:', puzzle.id);
             return;
           }
-          
+
+          const difficultyLabel = this._normalizeDifficulty(puzzle.difficulty, puzzle, category);
+
+          const puzzleDataPayload = {
+            ...puzzle,
+            category,
+            difficulty: difficultyLabel,
+            normalizedDifficulty: difficultyLabel,
+            fen: fenValue
+          };
+
           puzzleRecords.push({
             user_id: userId,
             report_id: reportId || null, // Make reportId optional (nullable)
             puzzle_key: puzzle.id || `${Date.now()}_${Math.random()}_${index}`,
-            category: puzzle.category || category, // Use category from grouping if not in puzzle
-            difficulty: puzzle.difficulty || 'intermediate',
-            theme: puzzle.theme || puzzle.mistakeType || 'tactical', // Handle missing theme
+            category,
+            difficulty: difficultyLabel,
+            theme: puzzle.theme || puzzle.mistakeType || puzzleDataPayload.metadata?.theme || 'tactical',
             is_locked: !isTeaser,
             requires_subscription: !isTeaser,
             is_teaser: isTeaser,
             unlock_tier: isTeaser ? 'free' : 'monthly',
             fen: fenValue,
-            title: puzzle.title || puzzle.objective || puzzle.description || 'Chess Puzzle',
+            title: puzzle.title || puzzle.objective || puzzle.description || puzzleDataPayload.metadata?.title || 'Chess Puzzle',
             source_game_id: puzzle.sourceGameId || puzzle.debugGameId || null,
-            rating_estimate: puzzle.ratingEstimate || puzzle.estimatedRating || puzzle.rating || this._estimateRating(puzzle.difficulty),
-            puzzle_data: puzzle, // Store complete puzzle object
+            rating_estimate: puzzle.ratingEstimate || puzzle.estimatedRating || puzzle.rating || this._estimateRating(difficultyLabel),
+            puzzle_data: puzzleDataPayload, // Store complete puzzle object
             index_in_category: index, // Store position within category (0-29)
             is_weekly_puzzle: false,
             week_number: null,
@@ -840,6 +898,64 @@ class PuzzleAccessService {
         hint: error.hint
       });
       throw error;
+    }
+  }
+
+  /**
+   * Get user-generated puzzles formatted for display in PuzzlePage
+   * This converts Supabase puzzle records to the format expected by PuzzlePage
+   * @param {string} userId - User ID
+   * @param {string} category - Puzzle category (e.g., 'learn-mistakes')
+   * @returns {Promise<Array>} - Puzzles formatted for PuzzlePage display
+   */
+  async getUserGeneratedPuzzlesForDisplay(userId, category) {
+    try {
+      console.log(`🎯 Fetching user-generated puzzles for display (category: ${category})`);
+
+      // Get puzzles from Supabase
+      const supabasePuzzles = await this.getPuzzlesByCategory(userId, category);
+
+      if (!supabasePuzzles || supabasePuzzles.length === 0) {
+        console.warn(`⚠️ No puzzles found for category: ${category}`);
+        return [];
+      }
+
+      // Transform puzzle data to match PuzzlePage format
+      const formattedPuzzles = supabasePuzzles.map((puzzle) => {
+        // Get the full puzzle data stored in puzzle_data field
+        const fullData = puzzle.puzzle_data || {};
+
+        // Extract solution and line moves
+        const solution = fullData.solution || '';
+        const lineUci = fullData.lineUci || '';
+        const normalizedCategory = puzzle.category === 'learn-mistakes' ? 'mistake' : puzzle.category;
+
+        return {
+          id: fullData.id || puzzle.puzzle_key || puzzle.id,
+          position: fullData.position || puzzle.fen,
+          initialPosition: puzzle.fen,
+          solution: solution,
+          lineUci: lineUci,
+          fen: puzzle.fen,
+          rating: fullData.rating || puzzle.rating_estimate || 1500,
+          popularity: fullData.popularity || 50,
+          themes: puzzle.theme || fullData.theme || '',
+          explanation: fullData.explanation || puzzle.title || '',
+          lineIndex: fullData.lineIndex || 0,
+          startLineIndex: fullData.startLineIndex || 0,
+          completed: false,
+          // Additional metadata from Supabase
+          category: normalizedCategory,
+          difficulty: puzzle.difficulty,
+          sourceGameId: puzzle.source_game_id
+        };
+      });
+
+      console.log(`✅ Formatted ${formattedPuzzles.length} user-generated puzzles for display`);
+      return formattedPuzzles;
+    } catch (error) {
+      console.error('❌ Failed to get user-generated puzzles for display:', error);
+      return [];
     }
   }
 }

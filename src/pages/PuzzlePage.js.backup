@@ -1,0 +1,834 @@
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
+
+import { Loader2, ArrowLeft, Eye, EyeOff, RotateCcw, Undo2 } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { Chess } from 'chess.js';
+import Chessboard from '../components/Chessboard';
+import { useAuth } from '../contexts/AuthContext';
+import userProfileService from '../services/userProfileService';
+import UpgradePrompt from '../components/UpgradePrompt';
+
+const PuzzlePage = () => {
+  const { puzzleType } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { user } = useAuth();
+  
+  const [currentPuzzle, setCurrentPuzzle] = useState(0);
+  const [feedback, setFeedback] = useState('');
+  const [showSolution, setShowSolution] = useState(false);
+  const [solutionText, setSolutionText] = useState('');
+
+  const [puzzles, setPuzzles] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [puzzleMetadata, setPuzzleMetadata] = useState(null);
+  const [orientation, setOrientation] = useState('white');
+  const [difficulty, setDifficulty] = useState('easy');
+  const [fullPuzzles, setFullPuzzles] = useState([]);
+  const [canAccess, setCanAccess] = useState(true);
+  const [showUpgradeNotice, setShowUpgradeNotice] = useState(false);
+
+  // Get analysis data and username from location state
+  const analysisData = location.state?.analysis;
+  const username = analysisData?.username;
+
+  const puzzle = puzzles[currentPuzzle];
+
+  // Load puzzles when component mounts
+  const deps = [puzzleType, username];
+  if (['fix-weaknesses', 'master-openings', 'sharpen-endgame'].includes(puzzleType)) {
+    deps.push(difficulty);
+  }
+  useEffect(() => {
+    const gatedLoad = async () => {
+      try {
+        if (!user?.id) {
+          setCanAccess(false);
+        } else {
+          const allowed = await userProfileService.canAccessPuzzles(user.id);
+          setCanAccess(!!allowed);
+        }
+      } catch (_) {
+        setCanAccess(false);
+      }
+      await loadPuzzles();
+    };
+    gatedLoad();
+  }, deps);
+
+  // Ensure teaser enforcement after puzzles/canAccess are known
+  useEffect(() => {
+    if (!canAccess && fullPuzzles && fullPuzzles.length > 0) {
+      setPuzzles(fullPuzzles.slice(0, 1));
+      setCurrentPuzzle(0);
+    }
+  }, [canAccess, fullPuzzles]);
+
+  // Set board orientation based on initial FEN when puzzle changes
+  // Also verify puzzle data consistency
+  useEffect(() => {
+    if (!puzzle) {
+      console.warn(`⚠️ No puzzle at index ${currentPuzzle}`);
+      return;
+    }
+
+    if (puzzle?.initialPosition) {
+      const side = puzzle.initialPosition.split(' ')[1] === 'b' ? 'black' : 'white';
+      setOrientation(side);
+    }
+
+    // Verify puzzle integrity when switching puzzles
+    if (!puzzle.id) {
+      console.error(`❌ Puzzle at index ${currentPuzzle} has no ID`, puzzle);
+    }
+    
+    if (!puzzle.solution && !puzzle.lineUci) {
+      console.error(`❌ Puzzle ${puzzle.id || `(index ${currentPuzzle})`} missing solution/lineUci`, {
+        hasPosition: !!puzzle.position,
+        hasSolution: !!puzzle.solution,
+        hasLineUci: !!puzzle.lineUci
+      });
+    }
+  }, [currentPuzzle, puzzle]);
+
+  // For learn-mistakes, show all puzzles without difficulty filtering
+  useEffect(() => {
+    if (puzzleType === 'learn-mistakes' && fullPuzzles.length > 0) {
+      setPuzzles(fullPuzzles);
+      setCurrentPuzzle(0);
+    }
+  }, [fullPuzzles, puzzleType]);
+
+  const loadPuzzles = async () => {
+    setIsLoading(true);
+    
+    try {
+      console.log(`🧩 Loading ${puzzleType} puzzles for ${username}...`);
+      
+      let puzzlesList = [];
+      let metadata = {};
+
+      switch (puzzleType) {
+        case 'fix-weaknesses':
+          puzzlesList = await puzzleGenerationService.generateWeaknessPuzzles(username, { maxPuzzles: 10, difficulty });
+          metadata = {
+            title: 'Fix My Weaknesses',
+            subtitle: 'Puzzles targeting your recurring mistake patterns',
+            description: 'These puzzles are generated from your most common mistakes to help you improve.'
+          };
+          break;
+
+        case 'learn-mistakes':
+          puzzlesList = await puzzleGenerationService.generateMistakePuzzles(username, { maxPuzzles: 20 });
+          metadata = {
+            title: 'Learn From My Mistakes',
+            subtitle: 'Puzzles from your mistakes',
+            description: 'Practice positions created from your own mistakes.'
+          };
+          break;
+
+        case 'master-openings': {
+          // Prefer SINGLE highest-frequency opening family from analysis state
+          let topFamilies = location.state?.topOpeningFamilies 
+            || location.state?.analysis?.performanceMetrics?.topOpeningFamilies;
+
+          // If a frequency map is available, derive the single best family
+          const freq = location.state?.analysis?.performanceMetrics?.openingFrequencies 
+            || location.state?.openingFrequencies;
+          if ((!Array.isArray(topFamilies) || topFamilies.length === 0) && freq && typeof freq === 'object') {
+            const best = Object.entries(freq).sort((a, b) => b[1] - a[1])[0]?.[0];
+            if (best) topFamilies = [best];
+          }
+
+          // Fallback: compute from games if nothing present
+          try {
+            if (!Array.isArray(topFamilies) || topFamilies.length === 0) {
+              const { default: openingPuzzleService } = await import('../services/openingPuzzleService');
+              const fromGames = await openingPuzzleService.getUserTopOpenings(username, 3);
+              topFamilies = Array.isArray(fromGames) && fromGames.length ? [fromGames[0]] : [];
+            }
+          } catch (_) {
+            topFamilies = [];
+          }
+
+          // Normalize family names to known base families so shards resolve correctly
+          const normalizeFamily = (name) => {
+            const n = String(name || '').replace(/’/g, "'").trim();
+            // Common families + synonyms + typos
+            if (/king'?s\s*pawn/i.test(n)) return "King's Pawn Game";
+            if (/french/i.test(n)) return 'French Defense';
+            if (/scotch|scoth/i.test(n)) return 'Scotch Game';
+            if (/english(\s+opening)?/i.test(n)) return 'English Opening';
+            if (/caro[-\s]?kann/i.test(n)) return 'Caro-Kann Defense';
+            if (/queen'?s\s+gambit/i.test(n)) return "Queen's Gambit";
+            if (/sicilian/i.test(n)) return 'Sicilian Defense';
+            if (/ruy\s+lopez/i.test(n)) return 'Ruy Lopez';
+            if (/four\s+knights/i.test(n)) return 'Four Knights Game';
+            if (/queen'?s\s+pawn/i.test(n)) return "Queen's Pawn Game";
+            if (/italian\s+game/i.test(n)) return 'Italian Game';
+            return n;
+          };
+          const normalizedFamilies = Array.isArray(topFamilies) ? topFamilies.map(normalizeFamily) : [];
+          const singleTop = normalizedFamilies.length ? [normalizedFamilies[0]] : [];
+
+          puzzlesList = await puzzleGenerationService.generateOpeningPuzzles(
+            username,
+            { maxPuzzles: 10, difficulty, preferredFamilies: singleTop }
+          );
+          const sub = (singleTop && singleTop.length)
+            ? `Puzzles from your most played opening: ${singleTop[0]}`
+            : 'Key positions from your opening repertoire';
+          metadata = {
+            title: 'Master My Openings',
+            subtitle: sub,
+            description: 'Improve your understanding of your favorite openings.'
+          };
+          break;
+        }
+          
+        case 'sharpen-endgame':
+          puzzlesList = await puzzleGenerationService.generateEndgamePuzzles({ maxPuzzles: 10, difficulty });
+          metadata = {
+            title: 'Sharpen My Endgame',
+            subtitle: 'Essential endgame techniques ',
+            description: 'Master fundamental endgame positions and techniques.'
+          };
+          break;
+          
+        default:
+          toast.error('Invalid puzzle type');
+          navigate('/report-display');
+          return;
+      }
+
+      // Validate puzzles
+      if (!puzzlesList || puzzlesList.length === 0) {
+        const msg = puzzleType === 'master-openings'
+          ? 'No opening puzzles found for your top openings yet. Play more games or try again later.'
+          : 'No puzzles could be generated. Please try again later.';
+        toast.error(msg);
+        navigate('/report-display');
+        return;
+      }
+
+      // Validate and normalize puzzles - ensure each puzzle has matching FEN, solution, and moves
+      const initialized = puzzlesList.map((p, idx) => {
+        // Extract FEN position
+        const fen = p.position || p.initialPosition;
+        if (!fen) {
+          console.warn(`⚠️ Puzzle ${idx} missing position/FEN, skipping`);
+          return null;
+        }
+
+        // Extract solution and moves - CRITICAL: must match this specific puzzle
+        const solution = p.solution || '';
+        const lineUci = p.lineUci || '';
+        
+        // Verify solution and lineUci aren't lost
+        if (!solution && !lineUci) {
+          console.warn(`⚠️ Puzzle ${idx} missing solution/lineUci`);
+        }
+
+        // Extract side to move
+        const sideToMove = fen.split(' ')[1] === 'b' ? 'black' : 'white';
+
+        return {
+          ...p,  // Preserve all original fields
+          id: p.id || `PUZZLE_${idx + 1}`,  // Ensure unique ID
+          initialPosition: fen,
+          position: fen,
+          solution,  // Explicitly set to ensure it's not lost
+          lineUci,  // Explicitly set to ensure it's not lost
+          sideToMove,
+          lineIndex: 0,
+          startLineIndex: 0,
+          completed: false
+        };
+      }).filter(Boolean);  // Remove any null entries
+
+      if (initialized.length === 0) {
+        toast.error('No valid puzzles could be processed');
+        navigate('/report-display');
+        return;
+      }
+
+      // For free users: show only 1 teaser puzzle on this page
+      if (!canAccess) {
+        setPuzzles(initialized.slice(0, 1));
+        setFullPuzzles(initialized);
+      } else {
+        setPuzzles(initialized);
+        setFullPuzzles(initialized);
+      }
+      setPuzzleMetadata(metadata);
+      setCurrentPuzzle(0);
+      
+      // Set board orientation based on first puzzle's FEN
+      const firstFen = initialized[0]?.position;
+      const firstSide = firstFen ? (firstFen.split(' ')[1] === 'b' ? 'black' : 'white') : 'white';
+      setOrientation(firstSide);
+      
+      // Verify first puzzle has solution
+      const firstPuzzle = initialized[0];
+      if (firstPuzzle?.id && (firstPuzzle?.solution || firstPuzzle?.lineUci)) {
+        console.log(`✅ Loaded ${initialized.length} ${puzzleType} puzzles (First puzzle ID: ${firstPuzzle.id})`);
+      } else {
+        console.warn(`⚠️ First puzzle may be missing solution/moves`, firstPuzzle);
+      }
+      
+    } catch (error) {
+      console.error('❌ Error loading puzzles:', error);
+      toast.error('Failed to load puzzles. Please try again.');
+      navigate('/report-display');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSquareClick = (square) => {
+    // Simple placeholder logic for move validation
+    if (!showSolution) {
+      const isCorrectMove = square.toLowerCase().includes(puzzle?.solution?.toLowerCase().slice(-2));
+      if (isCorrectMove) {
+        setFeedback('Correct! Well done!');
+      } else {
+        setFeedback('Not quite right. Try again or use a hint.');
+      }
+    }
+  };
+
+  const handleNextPuzzle = () => {
+    if (!canAccess) {
+      setShowUpgradeNotice(true);
+      return;
+    }
+    if (currentPuzzle < puzzles.length - 1) {
+      const nextIdx = currentPuzzle + 1;
+      const nextPuzzle = puzzles[nextIdx];
+      
+      // Verify next puzzle has valid data before navigating
+      if (!nextPuzzle?.id || (!nextPuzzle?.solution && !nextPuzzle?.lineUci)) {
+        console.warn(`⚠️ Next puzzle at index ${nextIdx} has missing data`, nextPuzzle);
+        toast.error('Error: Next puzzle data is incomplete. Please try again.');
+        return;
+      }
+      
+      setCurrentPuzzle(nextIdx);
+      setFeedback('');
+      setShowSolution(false);
+    } else {
+      setFeedback('🎉 You\'ve completed all puzzles in this category! Great job!');
+      toast.success('All puzzles completed!');
+    }
+  };
+
+  const handlePreviousPuzzle = () => {
+    if (currentPuzzle > 0) {
+      const prevIdx = currentPuzzle - 1;
+      const prevPuzzle = puzzles[prevIdx];
+      
+      // Verify previous puzzle has valid data before navigating
+      if (!prevPuzzle?.id || (!prevPuzzle?.solution && !prevPuzzle?.lineUci)) {
+        console.warn(`⚠️ Previous puzzle at index ${prevIdx} has missing data`, prevPuzzle);
+        toast.error('Error: Previous puzzle data is incomplete. Please try again.');
+        return;
+      }
+      
+      setCurrentPuzzle(prevIdx);
+      setFeedback('');
+      setShowSolution(false);
+    }
+  };
+
+  const handleResetPuzzle = () => {
+    setFeedback('');
+    setSolutionText('');
+    setShowSolution(false);
+    
+    // Get the initial position before updating state
+    const initialPos = puzzles[currentPuzzle]?.initialPosition || puzzles[currentPuzzle]?.position;
+    const startLineIdx = typeof puzzles[currentPuzzle]?.startLineIndex === 'number' ? puzzles[currentPuzzle].startLineIndex : 0;
+    const side = (initialPos || '').split(' ')[1] === 'b' ? 'black' : 'white';
+    
+    // Reset current puzzle to its initial FEN and its original starting line index
+    setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: initialPos, lineIndex: startLineIdx, completed: false } : pz));
+    setOrientation(side);
+  };
+
+  // Step back exactly one user turn (rewind to previous user move in the PV)
+  const handleStepBack = () => {
+    try {
+      const pz = puzzles[currentPuzzle];
+      const tokens = (pz?.lineUci || '').split(/\s+/).filter(Boolean);
+      const startIdx = typeof pz?.startLineIndex === 'number' ? pz.startLineIndex : 0;
+      let curIdx = typeof pz?.lineIndex === 'number' ? pz.lineIndex : startIdx;
+
+      // If no line or at the very start, nothing to step back
+      if (!tokens.length || curIdx <= startIdx) return;
+
+      // We want to end on a state where it's the user's turn to move next.
+      // The onMove advances: user move (idx), maybe engine reply (idx+1). So user turns are at even offsets from startIdx.
+      // Compute previous user index boundary.
+      const prevUserIdx = curIdx - ((curIdx - startIdx) % 2 === 0 ? 2 : 1);
+      const targetIdx = Math.max(startIdx, prevUserIdx);
+
+      // Rebuild position from initialPosition up to targetIdx moves applied
+      const engine = new Chess(pz.initialPosition || pz.position);
+      for (let i = startIdx; i < targetIdx; i++) {
+        const u = tokens[i];
+        if (!/^[a-h][1-8][a-h][1-8](?:[qrbn])?$/i.test(u)) break;
+        const from = u.slice(0, 2);
+        const to = u.slice(2, 4);
+        const prom = u.length > 4 ? u[4] : undefined;
+        const m = engine.move({ from, to, promotion: prom });
+        if (!m) break;
+      }
+
+      const newFen = engine.fen();
+      const side = newFen.split(' ')[1] === 'b' ? 'black' : 'white';
+
+      setFeedback('');
+      setShowSolution(false);
+      setPuzzles(prev => prev.map((pz2, i) => i === currentPuzzle ? { ...pz2, position: newFen, lineIndex: targetIdx, completed: false } : pz2));
+      setOrientation(side);
+    } catch (_) {
+      // no-op on failure
+    }
+  };
+
+  const handleShowSolution = () => {
+    // Toggle: if visible, hide and clear
+    if (showSolution) {
+      setShowSolution(false);
+      setSolutionText('');
+      return;
+    }
+
+    // Verify puzzle integrity before showing solution
+    if (!puzzle || !puzzle.id) {
+      console.error('❌ Puzzle object missing or invalid');
+      toast.error('Error: Puzzle data is corrupted. Please reload.');
+      return;
+    }
+
+    if (!puzzle.solution && !puzzle.lineUci) {
+      console.error('❌ Puzzle missing both solution and lineUci', { puzzleId: puzzle.id, currentPuzzleIdx: currentPuzzle });
+      toast.error('Error: Solution data not found for this puzzle. Please try another puzzle.');
+      return;
+    }
+
+    // Prepare remaining solution from the CURRENT position and current line index
+    const tokens = (puzzle?.lineUci || '').split(/\s+/).filter(Boolean);
+    const curIdx = typeof puzzle?.lineIndex === 'number' ? puzzle.lineIndex : 0;
+    
+    if (!tokens.length || curIdx >= tokens.length) {
+      // No more moves in line, show just the current best move (solution)
+      const _exp1 = (puzzle?.explanation || '').trim()
+        .replace(/\s*(?:—|-)?\s*Puzzle sourced from Lichess data ?set\.?$/i, '')
+        .replace(/\s*(?:—|-)?\s*From curated endgame data ?set\.?$/i, '');
+      
+      if (!puzzle.solution) {
+        console.warn(`⚠️ Puzzle ${puzzle.id} has no solution field`, puzzle);
+        setSolutionText(`Solution: [Unable to determine]${_exp1 ? ' — ' + _exp1 : ''}`);
+      } else {
+        setSolutionText(`Solution: ${puzzle.solution}${_exp1 ? ' — ' + _exp1 : ''}`);
+      }
+      setShowSolution(true);
+      return;
+    }
+
+    try {
+      const engine = new Chess(puzzle.position);
+      const sans = [];
+      for (let i = curIdx; i < tokens.length; i++) {
+        const u = tokens[i];
+        if (!/^[a-h][1-8][a-h][1-8](?:[qrbn])?$/i.test(u)) break;
+        const from = u.slice(0, 2);
+        const to = u.slice(2, 4);
+        const prom = u.length > 4 ? u[4] : undefined;
+        const m = engine.move({ from, to, promotion: prom });
+        if (!m) break;
+        sans.push(m.san);
+      }
+      const _exp2 = (puzzle?.explanation || '').trim()
+        .replace(/\s*(?:—|-)?\s*Puzzle sourced from Lichess data ?set\.?$/i, '')
+        .replace(/\s*(?:—|-)?\s*From curated endgame data ?set\.?$/i, '');
+      setSolutionText(`Solution: ${sans.join(' ')}${_exp2 ? ' — ' + _exp2 : ''}`);
+      setShowSolution(true);
+    } catch (err) {
+      console.error('❌ Error parsing solution moves', { puzzleId: puzzle.id, error: err.message });
+      const _exp3 = (puzzle?.explanation || '').trim()
+        .replace(/\s*(?:—|-)?\s*Puzzle sourced from Lichess data ?set\.?$/i, '')
+        .replace(/\s*(?:—|-)?\s*From curated endgame data ?set\.?$/i, '');
+      setSolutionText(`Solution: ${puzzle?.solution || '[Unable to parse]'}${_exp3 ? ' — ' + _exp3 : ''}`);
+      setShowSolution(true);
+    }
+  };
+
+
+
+  const handleBackToReport = () => {
+    const analysisData = location.state?.analysis;
+    navigate('/report-display', { state: { analysis: analysisData } });
+  };
+
+  // Show loading screen while puzzles are being generated
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center" style={{ paddingTop: '80px' }}>
+        <div className="text-center">
+          <Loader2 className="animate-spin mx-auto mb-4" size={48} />
+          <h2 className="text-xl font-semibold mb-2">Generating Your Puzzles...</h2>
+          <p className="text-gray-600">Creating personalized puzzles based on your games</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error if no puzzles loaded
+  if (!puzzles.length || !puzzle) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center" style={{ paddingTop: '80px' }}>
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">Puzzle not found</h2>
+          <button 
+            onClick={handleBackToReport}
+            className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+          >
+            Back to Report
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50" style={{ paddingTop: '80px' }}>
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <button
+                onClick={handleBackToReport}
+                className="text-gray-600 hover:text-gray-800 mb-2 flex items-center"
+              >
+                <ArrowLeft size={16} className="mr-1" />
+                Back to Report
+              </button>
+              <h1 className="text-2xl font-bold text-gray-800">{puzzleMetadata?.title}</h1>
+              <p className="text-gray-600">{puzzleMetadata?.subtitle}</p>
+              {puzzle?.opening && (
+                <div className="text-xs text-purple-700 mt-1">
+                  Opening: <span className="font-semibold">{puzzle.opening || ''}</span>
+                </div>
+              )}
+              {puzzleMetadata?.description && (
+                <p className="text-sm text-gray-500 mt-1">{puzzleMetadata.description}</p>
+              )}
+              {(puzzleType === 'fix-weaknesses' || puzzleType === 'master-openings' || puzzleType === 'sharpen-endgame') && (
+                <div className="mt-3">
+                  <label htmlFor="difficulty-select" className="block text-sm font-medium text-gray-700 mb-1">
+                    Difficulty Level
+                  </label>
+                  <select
+                    id="difficulty-select"
+                    value={difficulty}
+                    onChange={(e) => setDifficulty(e.target.value)}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="easy">Easy </option>
+                    <option value="medium">Medium </option>
+                    <option value="hard">Hard </option>
+                  </select>
+                </div>
+              )}
+            </div>
+            <div className="text-right">
+              <div className="text-sm text-gray-500">
+                Puzzle {currentPuzzle + 1} of {puzzles.length}
+              </div>
+              {!canAccess && (
+                <div className="text-xs text-amber-700 mt-1">
+                  Free teaser: showing 1 of {fullPuzzles?.length || puzzles.length}. Unlock the rest below.
+                </div>
+              )}
+              {puzzle?.source && (
+                <div className={`puzzle-source-badge text-xs mt-1 px-2 py-1 rounded-full inline-block ${
+                  puzzle.source === 'user_game' ? 'bg-green-100 text-green-700' :
+                  puzzle.source === 'user_mistake' ? 'bg-blue-100 text-blue-700' :
+                  puzzle.source === 'opening_repertoire' ? 'bg-purple-100 text-purple-700' :
+                  puzzle.source === 'fallback' ? 'bg-orange-100 text-orange-700' :
+                  'bg-gray-100 text-gray-700'
+                }`}>
+                  {puzzle.source === 'user_game' ? '🎯 From Your Game' : 
+                   puzzle.source === 'user_mistake' ? '🔍 From Your Mistakes' : 
+                   puzzle.source === 'opening_repertoire' ? `📚 From Your Openings${puzzle?.opening ? ` • ${puzzle.opening}` : ''}` :
+                   puzzle.source === 'lichess_dataset' ? `📚 Opening${puzzle?.opening ? ` • ${puzzle.opening}` : ''}` :
+                   puzzle.source === 'fallback' ? '⚠️ Sample Puzzle' : '📝 Curated'}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="max-w-7xl mx-auto px-4 py-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Side - Chessboard (60-70% width on desktop) */}
+          <div className="lg:col-span-2">
+            <div className="bg-white rounded-lg shadow p-6">
+              <Chessboard 
+                position={puzzle.position}
+                orientation={orientation}
+                enableArrows
+                preserveDrawingsOnPositionChange={true}
+                onDrawChange={({ arrows, circles }) => {
+                  // Optional: could be used to offer "try this line" or hints
+                  // console.log('drawings', arrows, circles);
+                }}
+                onMove={({ from, to, san, fen }) => {
+                  // Compare both SAN and UCI to handle Lichess dataset moves
+                  const isUci = (s) => /^[a-h][1-8][a-h][1-8](?:[qrbn])?$/i.test(s || '');
+                  const normalizeSan = (s) => (s || '').replace(/[+#?!]/g, '').replace(/=/g, '').trim().toLowerCase();
+                  const playedSan = normalizeSan(san);
+                  const target = (puzzle?.solution || '').trim();
+                  const targetSan = isUci(target) ? '' : normalizeSan(target);
+                  const playedUci = (() => {
+                    // Derive UCI from from/to, append promotion if SAN shows one
+                    let u = `${from}${to}`.toLowerCase();
+                    const promoMatch = (san || '').match(/=([QRBN])/i);
+                    if (promoMatch) u += promoMatch[1].toLowerCase();
+                    return u;
+                  })();
+                  const targetUci = isUci(target) ? target.toLowerCase() : '';
+
+           // Prefer line-based validation when a line exists; fallback to single-move solution otherwise
+                         const tokens = (puzzle.lineUci || '').split(/\s+/).filter(Boolean);
+                  const hasLine = tokens.length > 0;
+                  const curIdx = typeof puzzle.lineIndex === 'number' ? puzzle.lineIndex : 0;
+
+           if (hasLine) {
+                           const expectedUci = (tokens[curIdx] || '').toLowerCase();
+                    if (expectedUci && expectedUci === playedUci.toLowerCase()) {
+                      try {
+                        const engine = new Chess(puzzle.position);
+                        // Apply the user's correct move
+                        engine.move({ from, to, promotion: (san.match(/=([QRBN])/i)?.[1] || 'q').toLowerCase() });
+                        let nextIdx = curIdx + 1;
+                        
+                        // STEP 1: Update position with user's move immediately (smooth animation via Chessboard)
+                        const positionAfterUserMove = engine.fen();
+                        setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: positionAfterUserMove, lineIndex: nextIdx } : pz));
+                        setFeedback(`Good move: ${san}. Keep going!`);
+                        
+                        // STEP 2: Auto-play opponent reply if present, after a delay for smooth animation
+                        const replyUci = tokens[nextIdx];
+                        if (replyUci && /^[a-h][1-8][a-h][1-8](?:[qrbn])?$/i.test(replyUci)) {
+                          setTimeout(() => {
+                            try {
+                              const engine2 = new Chess(positionAfterUserMove);
+                              const rFrom = replyUci.slice(0, 2);
+                              const rTo = replyUci.slice(2, 4);
+                              const rProm = replyUci.length > 4 ? replyUci[4] : undefined;
+                              engine2.move({ from: rFrom, to: rTo, promotion: rProm });
+                              const finalFen = engine2.fen();
+                              const finalIdx = nextIdx + 1;
+                              const isDone = finalIdx >= tokens.length;
+                              setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: finalFen, lineIndex: finalIdx, completed: isDone } : pz));
+                              if (isDone) {
+                                setFeedback('🎉 Congratulations! You completed the puzzle.');
+                              }
+                            } catch (_) {
+                              // If auto-move fails, just keep the position after user move
+                            }
+                          }, 350); // Wait 350ms for user's move animation to complete before opponent moves
+                        } else {
+                          // No opponent reply, check if we're done
+                          const isDone = nextIdx >= tokens.length;
+                          if (isDone) {
+                            setFeedback('🎉 Congratulations! You completed the puzzle.');
+                            setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, completed: true } : pz));
+                          }
+                        }
+                      } catch (_) {
+                        // If anything fails, do not advance
+                      }
+                    } else {
+                      // WRONG MOVE: Still update position so reset can work properly
+                      // But don't advance lineIndex
+                      setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: fen } : pz));
+                      setFeedback(`Not quite. You played ${san}. Try again or show a hint.`);
+                    }
+                  } else {
+                    // Fallback: single-move correctness based on provided solution
+                    // Always update position so reset works
+                    setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: fen, completed: false } : pz));
+                    
+                    const correct = (targetSan && playedSan === targetSan) || (targetUci && playedUci === targetUci);
+                    if (correct) {
+                      setFeedback(`Correct! ${san} is the best move.`);
+                    } else if (targetSan || targetUci) {
+                      setFeedback(`Not quite. You played ${san}. Try again or show a hint.`);
+                    } else {
+                      setFeedback(`Move played: ${san}`);
+                    }
+                  }
+                }}
+                showCoordinates
+              />
+            </div>
+          </div>
+
+          {/* Right Side - Analysis Panel (30-40% width on desktop) */}
+          <div className="lg:col-span-1">
+            <div
+              className="bg-white rounded-lg shadow-lg p-6 h-fit"
+            >
+              {/* Title */}
+              <div className="mb-6">
+                <h2 className="text-xl font-bold text-gray-800 mb-2">
+                  Puzzle {currentPuzzle + 1}
+                </h2>
+                <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
+                  <div 
+                    className="bg-orange-500 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${((currentPuzzle + 1) / puzzles.length) * 100}%` }}
+                  ></div>
+                </div>
+                {puzzle?.mistakeType && (
+                  <div className="text-xs text-gray-500 mb-2">
+                    Focus: {puzzle.mistakeType.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                  </div>
+                )}
+                {puzzle?.opening && (
+                  <div className="text-xs text-purple-700 mb-2">
+                    Opening: <span className="font-semibold">{puzzle.opening || ''}</span>
+                  </div>
+                )}
+                <div className="text-xs text-gray-600 mb-2">
+                  Side to move: <span className="font-semibold">{orientation === 'black' ? 'Black' : 'White'}</span>
+                </div>
+                {puzzleType === 'learn-mistakes' && puzzle?.playerMove && (
+                  <div className="text-xs text-gray-600 mb-2">
+                    In your game, you played: <span className="font-semibold">{puzzle.playerMove}</span>
+                  </div>
+                )}
+                {puzzleType !== 'learn-mistakes' && puzzle?.gameInfo && (
+                  <div className="text-xs text-blue-600 mb-2">
+                    {puzzle.gameInfo}
+                  </div>
+                )}
+                {puzzle?.debugInfo && (
+                  <div className="text-xs text-orange-600 mb-2 bg-orange-50 p-2 rounded">
+                    ℹ️ Debug: {puzzle.debugInfo}
+                  </div>
+                )}
+              </div>
+
+              {/* Puzzle Description */}
+              <div className="mb-6">
+                <h3 className="font-semibold text-gray-700 mb-2">Objective:</h3>
+                <p className="text-gray-600 text-sm leading-relaxed">
+                  {puzzle.objective}
+                </p>
+              </div>
+
+              {/* Control Buttons */}
+              <div className="space-y-3 mb-6">
+                {/* Navigation Buttons - Top Row */}
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={handlePreviousPuzzle}
+                    disabled={currentPuzzle === 0}
+                    className="px-4 py-3 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-400 text-sm font-semibold flex items-center justify-center shadow-md"
+                  >
+                    ← Previous
+                  </button>
+                  <button
+                    onClick={handleNextPuzzle}
+                    disabled={!canAccess || currentPuzzle === puzzles.length - 1}
+                    className="px-4 py-3 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-400 text-sm font-semibold flex items-center justify-center shadow-md"
+                  >
+                    Next →
+                  </button>
+                </div>
+                
+                {/* Action Buttons - Bottom Row */}
+                <div className="grid grid-cols-3 gap-3">
+                  <button
+                    onClick={handleShowSolution}
+                    className="px-4 py-3 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors text-sm font-semibold flex items-center justify-center shadow-md"
+                  >
+                    {showSolution ? (
+                      <>
+                        <EyeOff size={16} className="mr-2" />
+                        Hide Solution
+                      </>
+                    ) : (
+                      <>
+                        <Eye size={16} className="mr-2" />
+                        Show Solution
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={handleStepBack}
+                    disabled={!puzzle?.lineUci || (typeof puzzle?.lineIndex === 'number' ? puzzle.lineIndex : (typeof puzzle?.startLineIndex === 'number' ? puzzle.startLineIndex : 0)) <= (typeof puzzle?.startLineIndex === 'number' ? puzzle.startLineIndex : 0)}
+                    className="px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm font-semibold flex items-center justify-center shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Undo2 size={16} className="mr-2" />
+                    Step Back
+                  </button>
+                  <button
+                    onClick={handleResetPuzzle}
+                    className="px-4 py-3 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors text-sm font-semibold flex items-center justify-center shadow-md"
+                  >
+                    <RotateCcw size={16} className="mr-2" />
+                    Reset
+                  </button>
+                </div>
+              </div>
+
+              {/* Solution Area (text only) */}
+              {showSolution && solutionText && (
+                <div className="p-4 rounded-lg text-sm bg-blue-100 text-blue-800 border border-blue-200">
+                  {solutionText}
+                </div>
+              )}
+
+              {/* Feedback Area */}
+              {feedback && !showSolution && (
+                <div className={`p-4 rounded-lg text-sm ${
+                  feedback.includes('Correct') 
+                    ? 'bg-green-100 text-green-800 border border-green-200' 
+                    : 'bg-yellow-100 text-yellow-800 border border-yellow-200'
+                }`}>
+                  {feedback}
+                </div>
+              )}
+
+              {/* Inline notice when free user tries Next */}
+              {!canAccess && showUpgradeNotice && (
+                <div className="mt-4 p-3 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-sm">
+                  You are on the free plan. Subscribe or buy a one-time pack to access the remaining puzzles in this section.
+                </div>
+              )}
+
+              {/* Upgrade prompt inline for free users */}
+              {!canAccess && (
+                <div className="mt-6">
+                  <UpgradePrompt title="Unlock All Puzzles in This Set" description="Subscribe or buy a one-time pack to access the full personalized puzzle set generated from your games." />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default PuzzlePage;

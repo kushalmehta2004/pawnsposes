@@ -96,6 +96,7 @@ const ChessBoardPreview = ({
             return (
               <div
                 key={`${rowIdx}-${colIdx}`}
+                className={`chessboard-square ${isLight ? 'light' : 'dark'}`}
                 style={{
                   width: `${squareSize}px`,
                   height: `${squareSize}px`,

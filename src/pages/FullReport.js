@@ -8,7 +8,7 @@ import toast from 'react-hot-toast';
 
 // Simple in-memory cache to persist across route toggles within the same session
 // Resets naturally when the app reloads or user leaves these pages
-let FULL_REPORT_CACHE = { key: null, videoRec: null, phaseReview: null, positionalStudy: null, actionPlan: null, recurringWeaknesses: null };
+let FULL_REPORT_CACHE = { key: null, videoRec: null, positionalStudy: null, actionPlan: null, recurringWeaknesses: null };
 
 // Global set to track saved analysis IDs across component mounts
 let SAVED_ANALYSIS_IDS = new Set();
@@ -41,7 +41,6 @@ const FullReport = () => {
 
   // Ref to prevent duplicate auto-saves
   const hasSavedRef = React.useRef(false);
-  const [phaseReview, setPhaseReview] = React.useState(null);
   const [actionPlan, setActionPlan] = React.useState(null);
   const [isLoadingActionPlan, setIsLoadingActionPlan] = React.useState(false);
 
@@ -190,17 +189,15 @@ const FullReport = () => {
   // Autosave functionality removed - users now save manually using the Save button
   // Track loading states for all async content
   const [isLoadingVideo, setIsLoadingVideo] = React.useState(false);
-  const [isLoadingPhaseReview, setIsLoadingPhaseReview] = React.useState(false);
 
   // Check if all content has finished loading
   const isAllContentLoaded = React.useMemo(() => {
     const hasVideoContent = !recurringWeaknesses || recurringWeaknesses.length === 0 || (!isLoadingVideo && videoRec?.url !== undefined);
     const hasPositionalStudy = !recurringWeaknesses || recurringWeaknesses.length === 0 || (!isLoadingStudy && positionalStudy !== null);
-    const hasPhaseReview = !analysis?.games?.length || (!isLoadingPhaseReview && phaseReview !== null);
     const hasActionPlan = !recurringWeaknesses || recurringWeaknesses.length === 0 || (!isLoadingActionPlan && actionPlan !== null);
     
-    return hasVideoContent && hasPositionalStudy && hasPhaseReview && hasActionPlan;
-  }, [recurringWeaknesses, videoRec, positionalStudy, isLoadingStudy, phaseReview, isLoadingPhaseReview, actionPlan, isLoadingActionPlan, analysis, isLoadingVideo]);
+    return hasVideoContent && hasPositionalStudy && hasActionPlan;
+  }, [recurringWeaknesses, videoRec, positionalStudy, isLoadingStudy, actionPlan, isLoadingActionPlan, analysis, isLoadingVideo]);
 
   // Auto-save PDF report when analysis is complete AND all content has loaded (only for new reports, not saved ones)
   React.useEffect(() => {
@@ -223,13 +220,11 @@ const FullReport = () => {
         loadingStates: {
           isLoadingVideo: isLoadingVideo,
           isLoadingStudy: isLoadingStudy,
-          isLoadingPhaseReview: isLoadingPhaseReview,
           isLoadingActionPlan: isLoadingActionPlan
         },
         contentStates: {
           hasVideoRec: !!videoRec?.url,
           hasPositionalStudy: !!positionalStudy,
-          hasPhaseReview: !!phaseReview,
           hasActionPlan: !!actionPlan
         }
       });
@@ -460,7 +455,7 @@ const FullReport = () => {
       const timeoutId = setTimeout(savePDFReportAutomatically, 1000);
       return () => clearTimeout(timeoutId);
     }
-  }, [user, analysis, performanceMetrics, recurringWeaknesses, engineInsights, improvementRecommendations, personalizedResources, reportId, analysisId, dataSource, isAllContentLoaded, videoRec, positionalStudy, phaseReview, actionPlan]);
+  }, [user, analysis, performanceMetrics, recurringWeaknesses, engineInsights, improvementRecommendations, personalizedResources, reportId, analysisId, dataSource, isAllContentLoaded, videoRec, positionalStudy, actionPlan]);
 
   const handleBackToReport = () => {
     // Pass computed data back so ReportDisplay can reuse it without refetching
@@ -476,7 +471,6 @@ const FullReport = () => {
         isAnalyzingWeaknesses,
         dataSource,
         // Also return advanced computed items to avoid recomputation
-        phaseReview,
         positionalStudy,
         videoRec,
         actionPlan,
@@ -570,56 +564,6 @@ const FullReport = () => {
     fetchStudy();
     return () => { cancelled = true; };
   }, [recurringWeaknesses]);
-
-  React.useEffect(() => {
-    let cancelled = false;
-
-    const cacheKey = analysis?.player?.username || analysis?.formData?.username || 'unknown';
-
-    // Restore from cache
-    if (FULL_REPORT_CACHE.key === cacheKey && FULL_REPORT_CACHE.phaseReview) {
-      setPhaseReview(FULL_REPORT_CACHE.phaseReview);
-      return () => {};
-    }
-
-    const runPhaseReview = async () => {
-      try {
-        if (!analysis || !Array.isArray(analysis.games) || analysis.games.length === 0) return;
-        
-        setIsLoadingPhaseReview(true);
-        const games = analysis.games;
-        // Build a compact summary for Gemini (minimal fields)
-        const gamesSummary = games.slice(0, 20).map(g => ({
-          gameNumber: g.gameNumber,
-          color: g.userColor || (g.white?.username === analysis?.player?.username ? 'white' : 'black'),
-          result: g.result || g.outcome || g.winner || '',
-          accuracy: g.accuracyData?.userAccuracy ?? g.userAccuracy ?? g.accuracy,
-          moves: Array.isArray(g.moves) ? g.moves.length : (g.moveCount || g.moves),
-          opening: g.opening || { name: g.openingName, eco: g.eco },
-          phaseDrops: g.phaseDrops // if any precomputed phase drops are stored
-        }));
-        const playerInfo = {
-          username: analysis?.player?.username,
-          skillLevel: analysis?.player?.skillLevel || performanceMetrics?.skillLevel,
-          averageRating: analysis?.player?.averageRating || performanceMetrics?.averageRating,
-        };
-        const { generatePhaseReviewFromGames } = await import('../utils/geminiStockfishAnalysis');
-        const result = await generatePhaseReviewFromGames(gamesSummary, playerInfo);
-        if (!cancelled) {
-          setPhaseReview(result);
-          FULL_REPORT_CACHE = { ...FULL_REPORT_CACHE, key: cacheKey, phaseReview: result };
-        }
-      } catch (e) {
-        console.warn('Phase review generation skipped:', e.message);
-      } finally {
-        if (!cancelled) {
-          setIsLoadingPhaseReview(false);
-        }
-      }
-    };
-    runPhaseReview();
-    return () => { cancelled = true; };
-  }, [analysis, performanceMetrics]);
 
   // Fetch Gemini-curated actionable plan based on existing weaknesses
   React.useEffect(() => {
@@ -1696,18 +1640,32 @@ const FullReport = () => {
                                   </p>
                                 )}
 
-                                {/* Mistake Explanation */}
+                                {/* Mistake Explanation - 2-line justification */}
                                 {example.explanation && (
-                                  <p style={{ 
-                                    fontSize: '0.875rem', 
-                                    color: '#1f2937',
-                                    marginBottom: '0.5rem',
-                                    lineHeight: '1.5',
-                                    whiteSpace: 'pre-wrap',
-                                    wordWrap: 'break-word'
+                                  <div style={{ 
+                                    marginBottom: '0.75rem'
                                   }}>
-                                    <strong>Why it's a mistake:</strong> {example.explanation}
-                                  </p>
+                                    <p style={{ 
+                                      fontSize: '0.8rem', 
+                                      fontWeight: '600', 
+                                      color: '#7f1d1d',
+                                      marginBottom: '0.375rem'
+                                    }}>
+                                      Why this move was inferior:
+                                    </p>
+                                    <p style={{ 
+                                      fontSize: '0.875rem', 
+                                      color: '#1f2937',
+                                      marginBottom: '0',
+                                      lineHeight: '1.6',
+                                      whiteSpace: 'pre-wrap',
+                                      wordWrap: 'break-word',
+                                      paddingLeft: '0.75rem',
+                                      borderLeft: '3px solid #fecaca'
+                                    }}>
+                                      {example.explanation}
+                                    </p>
+                                  </div>
                                 )}
 
                                 {/* FEN Position and View on Lichess Button */}
@@ -1761,22 +1719,31 @@ const FullReport = () => {
                           </div>
                         )}
 
-                        {/* Superior Plan */}
+                        {/* Superior Plan / Better Move Explanation */}
                         {weakness.superiorPlan && (
                           <div style={{
-                            backgroundColor: '#ecfdf5',
-                            padding: '0.75rem',
-                            borderRadius: '0.25rem',
-                            marginTop: '0.75rem',
-                            border: '1px solid #a7f3d0'
+                            backgroundColor: '#f0fdf4',
+                            padding: '0.875rem',
+                            borderRadius: '0.375rem',
+                            marginTop: '1rem',
+                            border: '1px solid #bbf7d0',
+                            borderLeft: '4px solid #22c55e'
                           }}>
                             <p style={{ 
+                              fontSize: '0.8rem', 
+                              fontWeight: '600', 
+                              color: '#166534',
+                              marginBottom: '0.375rem'
+                            }}>
+                              ✓ Better approach:
+                            </p>
+                            <p style={{ 
                               fontSize: '0.875rem', 
-                              color: '#065f46',
+                              color: '#1b5e20',
                               margin: 0,
                               lineHeight: '1.6'
                             }}>
-                              <strong>Superior approach:</strong> {weakness.superiorPlan}
+                              {weakness.superiorPlan}
                             </p>
                           </div>
                         )}
@@ -1822,88 +1789,8 @@ const FullReport = () => {
               </section>
             )}
 
-            {/* Section 3: Phase Review */}
-            <section style={{ marginBottom: '2rem' }}>
-              <h2 className="section-header">
-                <i className="fas fa-tasks"></i>Phase Review
-              </h2>
-              <div style={{ 
-                display: 'grid', 
-                gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', 
-                gap: '1.5rem' 
-              }}>
-                {/* Middlegame Card */}
-                <div style={{
-                  backgroundColor: '#f9fafb',
-                  padding: '1rem',
-                  borderRadius: '0.5rem',
-                  border: '1px solid #e5e7eb'
-                }}>
-                  <h3 style={{ 
-                    fontWeight: '700', 
-                    color: '#1f2937', 
-                    marginBottom: '0.75rem' 
-                  }}>
-                    Middlegame <span style={{ color: '#6b7280', fontWeight: '500' }}>(Overall: {phaseReview?.middlegame?.overall ?? 5}/10)</span>
-                  </h3>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.875rem' }}>
-                    {(phaseReview?.middlegame?.metrics ?? [
-                      { label: 'Positional Understanding', score: 4 },
-                      { label: 'Tactical Awareness', score: 7 },
-                      { label: 'Plan Formation', score: 3 },
-                      { label: 'Piece Coordination', score: 6 },
-                    ]).map((m, idx) => (
-                      <React.Fragment key={idx}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span>{m.label}</span><span>{m.score}/10</span>
-                        </div>
-                        <div className="rating-bar-bg"><div className="rating-bar" style={{ width: `${Math.max(0, Math.min(10, m.score)) * 10}%` }}></div></div>
-                      </React.Fragment>
-                    ))}
-                  </div>
-                </div>
-                
-                {/* Endgame Card */}
-                <div style={{
-                  backgroundColor: '#f9fafb',
-                  padding: '1rem',
-                  borderRadius: '0.5rem',
-                  border: '1px solid #e5e7eb'
-                }}>
-                  <h3 style={{ 
-                    fontWeight: '700', 
-                    color: '#1f2937', 
-                    marginBottom: '0.75rem' 
-                  }}>
-                    Endgame <span style={{ color: '#6b7280', fontWeight: '500' }}>(Overall: {phaseReview?.endgame?.overall ?? 4}/10)</span>
-                  </h3>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.875rem' }}>
-                    {(phaseReview?.endgame?.details ?? [
-                      { label: 'Pawn Endgames (3 games, 33% success)', score: 5 },
-                      { label: 'Rook Endgames (2 games, 0% success)', score: 3 },
-                      { label: 'Queen Endgames (1 game, 0% success)', score: 4 },
-                    ]).map((d, idx) => (
-                      <React.Fragment key={idx}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span>{d.label}</span><span>{d.score}/10</span>
-                        </div>
-                        <div className="rating-bar-bg"><div className="rating-bar" style={{ width: `${Math.max(0, Math.min(10, d.score)) * 10}%` }}></div></div>
-                      </React.Fragment>
-                    ))}
-                    <p style={{ 
-                      fontSize: '0.75rem', 
-                      color: '#6b7280', 
-                      fontStyle: 'italic', 
-                      marginTop: '0.75rem' 
-                    }}>
-                      {phaseReview?.endgame?.notes ?? 'Common Mistakes: Rushing moves, underestimating opponent resources, passive defence.'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </section>
 
-            {/* Section 4: Action Plan - Mental Checklist */}
+            {/* Section 3: Action Plan - Mental Checklist */}
             <section className="action-plan" style={{ marginBottom: '2rem' }}>
               <h2 className="section-header">
                 <i className="fas fa-bullseye"></i>Actionable Improvement Plan

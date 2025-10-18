@@ -284,23 +284,26 @@ const Dashboard = () => {
       
       // Extract puzzle_data from Supabase records
       // Each record has the full puzzle object in the puzzle_data JSONB column
-      const extractPuzzleData = (records) => {
-        return records.map(record => ({
-          ...record.puzzle_data, // Spread the full puzzle data
-          id: record.id, // Use Supabase UUID as ID
-          supabaseId: record.id, // Keep reference to Supabase record
-          category: record.category,
-          isLocked: record.is_locked,
-          isTeaser: record.is_teaser
-        }));
+      const extractPuzzleData = (records, defaultCategory) => {
+        return records.map(record => {
+          const normalizedCategory = record.category === 'learn-mistakes' ? 'mistake' : record.category;
+          return {
+            ...record.puzzle_data, // Spread the full puzzle data
+            id: record.puzzle_data?.id || record.id, // Prefer original puzzle id when available
+            supabaseId: record.id, // Keep reference to Supabase record
+            category: normalizedCategory || defaultCategory,
+            isLocked: record.is_locked,
+            isTeaser: record.is_teaser
+          };
+        });
       };
-      
+
       // Update context with new puzzle data
-      const extractedWeakness = extractPuzzleData(weaknessData);
-      const extractedMistake = extractPuzzleData(mistakeData);
-      const extractedOpening = extractPuzzleData(openingData);
-      const extractedEndgame = extractPuzzleData(endgameData);
-      
+      const extractedWeakness = extractPuzzleData(weaknessData, 'weakness');
+      const extractedMistake = extractPuzzleData(mistakeData, 'mistake');
+      const extractedOpening = extractPuzzleData(openingData, 'opening');
+      const extractedEndgame = extractPuzzleData(endgameData, 'endgame');
+
       updatePuzzleData(user.id, extractedWeakness, extractedMistake, extractedOpening, extractedEndgame);
       
       // ✅ Apply tier-based filtering
@@ -897,13 +900,13 @@ const Dashboard = () => {
           >
             {userTier === 'free' ? (
               hasClaimedFreeReport() ? (
-                <div className="bg-gradient-to-r from-orange-50 to-amber-50 border-2 border-orange-200 rounded-xl p-4 shadow-md">
+                <div className="bg-gradient-to-r from-orange-50 to-amber-50 dark:from-[#7C2D12] dark:to-[#92400E] border-2 border-orange-200 dark:border-orange-800 rounded-xl p-4 shadow-md">
                   <div className="flex items-center justify-between flex-wrap gap-3">
                     <div className="flex items-center gap-3">
-                      <Lock className="w-6 h-6 text-orange-600" />
+                      <Lock className="w-6 h-6 text-orange-600 dark:text-orange-300" />
                       <div>
-                        <p className="font-semibold text-gray-800">📋 Free Plan - Limited Puzzles</p>
-                        <p className="text-sm text-gray-600">You have 1 teaser puzzle per category. Subscribe to unlock full puzzle sets weekly!</p>
+                        <p className="font-semibold text-gray-800 dark:text-orange-100">📋 Free Plan - Limited Puzzles</p>
+                        <p className="text-sm text-gray-600 dark:text-orange-200">You have 1 teaser puzzle per category. Subscribe to unlock full puzzle sets weekly!</p>
                       </div>
                     </div>
                     <button
@@ -915,15 +918,15 @@ const Dashboard = () => {
                   </div>
                 </div>
               ) : (
-                <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-xl p-4 shadow-md">
+                <div className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-[#14532D] dark:to-[#155E3B] border-2 border-green-200 dark:border-green-800 rounded-xl p-4 shadow-md">
                   <div className="flex items-center justify-between flex-wrap gap-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                      <div className="w-10 h-10 bg-green-500 dark:bg-green-600 rounded-full flex items-center justify-center text-white font-bold text-lg">
                         1
                       </div>
                       <div>
-                        <p className="font-semibold text-gray-800">Free Report Available</p>
-                        <p className="text-sm text-gray-600">You have 1 free report remaining. Subscribe for unlimited access!</p>
+                        <p className="font-semibold text-gray-800 dark:text-green-100">Free Report Available</p>
+                        <p className="text-sm text-gray-600 dark:text-green-200">You have 1 free report remaining. Subscribe for unlimited access!</p>
                       </div>
                     </div>
                     <button
@@ -936,14 +939,14 @@ const Dashboard = () => {
                 </div>
               )
             ) : (
-              <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border-2 border-purple-200 rounded-xl p-4 shadow-md">
+              <div className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-[#581C87] dark:to-[#4F46E5] border-2 border-purple-200 dark:border-purple-800 rounded-xl p-4 shadow-md">
                 <div className="flex items-center gap-3">
-                  <Crown className="w-6 h-6 text-purple-600" />
+                  <Crown className="w-6 h-6 text-purple-600 dark:text-purple-300" />
                   <div className="flex-1">
-                    <p className="font-semibold text-gray-800">
+                    <p className="font-semibold text-gray-800 dark:text-purple-100">
                       ✨ {userTier.charAt(0).toUpperCase() + userTier.slice(1).replace('_', ' ')} Plan Active
                     </p>
-                    <p className="text-sm text-gray-600">
+                    <p className="text-sm text-gray-600 dark:text-purple-200">
                       {userTier === 'one_time' 
                         ? 'Valid for 1 week from purchase'
                         : userTier === 'monthly' 

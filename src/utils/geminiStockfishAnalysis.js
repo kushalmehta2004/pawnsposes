@@ -1804,7 +1804,7 @@ Begin your analysis now.` + JSON.stringify(compactGames);
         return example;
       }
 
-      const prompt = `You are a world-class chess coach explaining a position to a student.
+      const prompt = `You are a world-class chess coach explaining a specific mistake to a student.
 
 CONTEXT:
 - Weakness being addressed: "${weaknessTitle}"
@@ -1814,30 +1814,31 @@ CONTEXT:
 - Stockfish's best move: ${example.betterMove}
 - Move number: ${example.moveNumber}
 
-TASK:
-Explain in 2-3 sentences:
-1. WHY the move "${example.betterMove}" is superior (what strategic/tactical idea does it accomplish?)
-2. What specific plan or advantage does it create?
+CRITICAL TASK - PROVIDE EXACTLY 2 LINES:
+You must provide exactly 2 lines explaining why "${example.played}" was a bad move in this position.
+
+Line 1: Describe what went wrong with the played move (what tactical/strategic idea was missed or what weakness it created)
+Line 2: Explain the immediate consequence or what it allows the opponent to do
 
 Return ONLY a JSON object with this exact structure:
 {
-  "justification": "Brief explanation of why the played move was inferior (1-2 sentences, reference specific squares and pieces)",
-  "betterPlan": "Explanation of why ${example.betterMove} is superior and what plan it enables (2-3 sentences, be specific about the strategic idea)"
+  "justification": "Exactly 2 lines explaining why the move ${example.played} was bad. Line 1: [specific tactical/strategic flaw]. Line 2: [immediate consequence]. Reference specific squares and pieces. Example: 'This move fails to control the critical d5 square, allowing White's attack to build. It also weakens the f6 square and abandons defense of the kingside.'",
+  "betterPlan": "Why ${example.betterMove} is superior: [specific strategic/tactical benefit with exact squares or pieces involved]"
 }
 
-CRITICAL RULES:
-- DO NOT suggest any additional moves beyond ${example.betterMove}
-- DO NOT use chess notation like Nf3, Qd5, etc. in your explanation EXCEPT when referring to ${example.betterMove} itself
-- Focus on CONCEPTS: "controls the center", "activates the rook", "improves piece coordination", "prevents counterplay"
-- Reference squares by name (e.g., "d5", "the kingside") but DO NOT suggest moves
-- Examples of GOOD explanations: "controls the critical d5 square", "activates the rook along the third rank", "prevents Black's counterplay on the queenside"
-- Examples of BAD explanations: "followed by Nf3 and Qd2" (suggesting additional moves), "then play Re1" (suggesting moves)
+ABSOLUTE REQUIREMENTS:
+- justification MUST be exactly 2 sentences/lines
+- Reference SPECIFIC squares (e.g., d5, f6, e4) and SPECIFIC pieces (e.g., the rook, the knight)
+- DO NOT suggest additional moves beyond ${example.betterMove}
+- DO NOT use chess notation like Nf3, Qd5 EXCEPT when unavoidable for clarity
+- Be concrete and specific, not vague
+- Each line should be substantial and meaningful
 
-STYLE:
-- Use sophisticated chess terminology
-- Reference specific squares, pieces, and strategic concepts
-- Be concise but insightful
-- Focus on the IDEA behind the move, not just "it's better"
+STYLE GUIDELINES:
+- Use sophisticated chess terminology (weak square, tempo, compensation, initiative, etc.)
+- Reference specific board areas (kingside, queenside, center, long diagonal, etc.)
+- Explain the CONCEPT and WHY it matters
+- Make it educational and precise
 
 Return ONLY valid JSON, no additional text.`;
 
@@ -1917,12 +1918,18 @@ Return ONLY valid JSON, no additional text.`;
         gameNumber: ex.gameNumber,
         moveNumber: ex.moveNumber,
         played: ex.played,
+        move: ex.played, // For backward compatibility
         fen: ex.fen,
         justification: ex.justification,
+        explanation: ex.justification, // Map to UI's expected field name
         betterPlan: ex.betterPlan,
+        superiorPlan: ex.betterPlan, // Map to UI's expected field name
         betterMove: ex.betterMove,
         playerColor: ex.playerColor
       })),
+      // Add superiorPlan at weakness level for backward compatibility
+      superiorPlan: enhancedExamples.length > 0 ? enhancedExamples[0].betterPlan : null,
+      explanation: w.description, // Map description to explanation for UI
       actionPlan: generateActionPlanForWeakness(w.title, categorizeWeaknessByContent(w.description || w.title || ''))
     };
     
