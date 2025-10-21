@@ -44,6 +44,10 @@ const FullReport = () => {
   const [actionPlan, setActionPlan] = React.useState(null);
   const [isLoadingActionPlan, setIsLoadingActionPlan] = React.useState(false);
 
+  // Gemini-suggested YouTube video for primary weakness
+  const [videoRec, setVideoRec] = React.useState({ title: null, creator: null });
+  const [isLoadingVideo, setIsLoadingVideo] = React.useState(false);
+
   // Create a unique identifier for this analysis to prevent duplicate saves
   const analysisId = React.useMemo(() => {
     if (!analysis) return null;
@@ -79,60 +83,87 @@ const FullReport = () => {
     }
   }, [initialRecurringWeaknesses, analysis]);
 
-  // Simple keyword -> YouTube mapping + fallback search (no API key)
-  const [videoRec, setVideoRec] = React.useState({ title: null, url: null });
-
   const topicFromWeakness = React.useMemo(() => {
     const t = (recurringWeaknesses?.[0]?.title || performanceMetrics?.focusArea || '').toString().trim().toLowerCase();
     return t;
   }, [recurringWeaknesses, performanceMetrics]);
 
-  // Fetch a precise, working YouTube video for the user's first weakness
+  // Ask Gemini to suggest a specific YouTube video for the primary weakness
   React.useEffect(() => {
     let cancelled = false;
 
-    // Use cache key based on current analysis identity to persist between toggles
-    const cacheKey = analysis?.player?.username || analysis?.formData?.username || 'unknown';
+    const getGeminiVideoSuggestion = async () => {
+      if (!topicFromWeakness || topicFromWeakness.trim().length === 0) {
+        setVideoRec({ title: null, creator: null });
+        return;
+      }
 
-    // Restore from cache if available
-    if (FULL_REPORT_CACHE.key === cacheKey && FULL_REPORT_CACHE.videoRec) {
-      setVideoRec(FULL_REPORT_CACHE.videoRec);
-      return () => {};
-    }
-
-    const run = async () => {
+      setIsLoadingVideo(true);
       try {
-        if (!recurringWeaknesses || recurringWeaknesses.length === 0) {
-          setVideoRec({ title: null, url: null });
+        const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+        if (!apiKey || apiKey === 'your_gemini_api_key_here') {
+          setVideoRec({ title: null, creator: null });
+          setIsLoadingVideo(false);
           return;
         }
+
+        const prompt = `You are a chess coach recommending a YouTube video to help improve a player's chess skills.
+
+The player's primary weakness is: "${topicFromWeakness}"
+
+Suggest ONE specific, real, and highly relevant YouTube video that teaches about this weakness.
+
+Return ONLY a JSON object with exactly this format (no markdown, no extra text):
+{
+  "title": "Exact video title as it appears on YouTube",
+  "creator": "Channel creator name"
+}`;
+
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.7, maxOutputTokens: 200 }
+          })
+        });
+
+        if (!response.ok) {
+          console.error('Gemini API error:', response.status);
+          if (!cancelled) setVideoRec({ title: null, creator: null });
+          return;
+        }
+
+        const data = await response.json();
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+        // Parse JSON response
+        const jsonStart = text.indexOf('{');
+        const jsonEnd = text.lastIndexOf('}');
+        if (jsonStart < 0 || jsonEnd <= jsonStart) {
+          console.warn('Could not parse Gemini response');
+          if (!cancelled) setVideoRec({ title: null, creator: null });
+          return;
+        }
+
+        const parsed = JSON.parse(text.slice(jsonStart, jsonEnd + 1));
         
-        setIsLoadingVideo(true);
-        const { searchBestYouTubeForWeakness } = await import('../services/youtubeSearchService');
-        const topic = (recurringWeaknesses?.[0]?.title || '').toString().trim();
-        if (!topic) {
-          setVideoRec({ title: null, url: null });
-          return;
-        }
-        
-        const rec = await searchBestYouTubeForWeakness(topic);
-        if (rec?.url) {
-          if (!cancelled) {
-            const value = { title: rec.title || 'Recommended Video', url: rec.url };
-            setVideoRec(value);
-            FULL_REPORT_CACHE = { ...FULL_REPORT_CACHE, key: cacheKey, videoRec: value };
-          }
-          return;
-        } else {
-          // No video found
-          if (!cancelled) {
-            setVideoRec({ title: null, url: null });
-          }
-        }
-      } catch (e) {
-        // No fallback shown to avoid unreliable links
         if (!cancelled) {
-          setVideoRec({ title: null, url: null });
+          if (parsed?.title && parsed?.creator) {
+            console.log('✅ Video suggestion from Gemini:', parsed.title);
+            setVideoRec({
+              title: parsed.title,
+              creator: parsed.creator
+            });
+          } else {
+            console.warn('Invalid video data from Gemini');
+            setVideoRec({ title: null, creator: null });
+          }
+        }
+      } catch (error) {
+        console.error('Error getting Gemini video suggestion:', error);
+        if (!cancelled) {
+          setVideoRec({ title: null, creator: null });
         }
       } finally {
         if (!cancelled) {
@@ -140,17 +171,12 @@ const FullReport = () => {
         }
       }
     };
-    run();
-    return () => { cancelled = true; };
-  }, [recurringWeaknesses, analysis, performanceMetrics]);
 
-  React.useEffect(() => {
-    const topic = topicFromWeakness;
-    if (!topic) { setVideoRec({ title: null, url: null }); return; }
-    // If AI already provided a concrete video, do not override
-    if (videoRec?.url) return;
-    // No search-based fallback: only show verified direct video links when available
-  }, [topicFromWeakness, videoRec?.url]);
+    getGeminiVideoSuggestion();
+    return () => { cancelled = true; };
+  }, [topicFromWeakness]);
+
+
 
   // Debug: Log what we actually received
   React.useEffect(() => {
@@ -186,18 +212,14 @@ const FullReport = () => {
     }
   }, [analysis, performanceMetrics, recurringWeaknesses, isCalculatingMetrics, isAnalyzingWeaknesses, dataSource]);
 
-  // Autosave functionality removed - users now save manually using the Save button
-  // Track loading states for all async content
-  const [isLoadingVideo, setIsLoadingVideo] = React.useState(false);
-
   // Check if all content has finished loading
   const isAllContentLoaded = React.useMemo(() => {
-    const hasVideoContent = !recurringWeaknesses || recurringWeaknesses.length === 0 || (!isLoadingVideo && videoRec?.url !== undefined);
+    const hasVideoContent = !recurringWeaknesses || recurringWeaknesses.length === 0 || (!isLoadingVideo && videoRec?.title !== undefined);
     const hasPositionalStudy = !recurringWeaknesses || recurringWeaknesses.length === 0 || (!isLoadingStudy && positionalStudy !== null);
     const hasActionPlan = !recurringWeaknesses || recurringWeaknesses.length === 0 || (!isLoadingActionPlan && actionPlan !== null);
     
     return hasVideoContent && hasPositionalStudy && hasActionPlan;
-  }, [recurringWeaknesses, videoRec, positionalStudy, isLoadingStudy, actionPlan, isLoadingActionPlan, analysis, isLoadingVideo]);
+  }, [recurringWeaknesses, videoRec, positionalStudy, isLoadingStudy, actionPlan, isLoadingActionPlan, isLoadingVideo]);
 
   // Auto-save PDF report when analysis is complete AND all content has loaded (only for new reports, not saved ones)
   React.useEffect(() => {
@@ -1919,41 +1941,29 @@ const FullReport = () => {
                   </div>
                 </div>
                 
-                {/* Video Recommendation */}
-                <div className="checklist-item">
-                  <i className="fab fa-youtube" style={{ color: '#dc2626', fontSize: '1.25rem', marginRight: '1rem', marginTop: '0.25rem' }}></i>
-                  <div>
-                    <h4 style={{ fontWeight: '600', color: '#1f2937' }}>
-                      {personalizedResources?.videoRecommendation || 'Recommended Video'}
-                    </h4>
-                    <p style={{ fontSize: '0.875rem', color: '#4b5563' }}>
-                      {videoRec?.url && videoRec?.title ? (
-                        <a 
-                          href={videoRec.url} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          style={{ color: '#dc2626', textDecoration: 'underline' }}
-                        >
-                          Watch: {videoRec.title}
-                        </a>
-                      ) : personalizedResources?.videoUrl ? (
-                        <a 
-                          href={personalizedResources.videoUrl} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          style={{ color: '#dc2626', textDecoration: 'underline' }}
-                        >
-                          Watch: {personalizedResources.videoRecommendation}
-                        </a>
-                      ) : personalizedResources?.videoRecommendation ? (
-                        personalizedResources.videoRecommendation
-                      ) : (
-                        'Search for instructional videos on your primary weakness area'
-                      )}
-                    </p>
+      
+
+                {/* Video Recommendation - Gemini-Suggested YouTube Video */}
+                {videoRec?.title && (
+                  <div className="checklist-item">
+                    <i className="fab fa-youtube" style={{ color: '#ff0000', fontSize: '1.25rem', marginRight: '1rem', marginTop: '0.25rem' }}></i>
+                    <div style={{ width: '100%' }}>
+                      <h4 style={{ fontWeight: '600', color: '#1f2937', margin: '0 0 0.5rem 0' }}>
+                        Recommended Video
+                      </h4>
+                      <p style={{ fontSize: '0.875rem', color: '#4b5563', margin: 0 }}>
+                        <span style={{ fontWeight: '600', display: 'block', marginBottom: '0.25rem' }}>
+                          ▶ {videoRec.title}
+                        </span>
+                        {videoRec.creator && (
+                          <span style={{ color: '#6b7280', fontSize: '0.8125rem' }}>
+                            by {videoRec.creator}
+                          </span>
+                        )}
+                      </p>
+                    </div>
                   </div>
-                </div>
-                
+                )}
 
                 
               </div>

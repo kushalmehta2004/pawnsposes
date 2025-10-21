@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { ChevronDown, User, Hash, BarChart3, Loader2, Check, CheckCircle, XCircle, Crown, Lock } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -5392,8 +5392,8 @@ Return your analysis in the following JSON format:
       "Step 3: Concrete action for next 10 games"
     ],
     "youtubeVideo": {
-      "title": "Exact video title",
-      "creator": "Channel name"
+      "title": "ONLY if 100% confident: Exact video title as it appears on YouTube. Must address PRIMARY WEAKNESS. If uncertain video exists, use null.",
+      "creator": "ONLY if 100% confident: Verified channel (GothamChess, agadmator, ChessNetwork, Saint Louis Chess Club, Eric Rosen). If uncertain, use null. NEVER invent titles."
     },
     "masterGame": "Classic master game that illustrates a concept they need to learn (e.g., 'Kasparov vs Karpov, 1985 - Weak Square Exploitation')"
   }
@@ -5406,6 +5406,20 @@ Return your analysis in the following JSON format:
 4. Focus on positional chess concepts that players above 1300-2600 struggle with
 5. Concepts to consider: outposts/weak squares, pawn breaks/pawn tension, trading good vs bad pieces, exchange sacrifices, counterattack, static and dynamic weaknesses, blockade or restriction, space advantage, minority attacks, isolated queen pawn, passed pawns, position evaluation, improving pieces, candidate moves, deep tactical visualization (3-4 moves)
 6. Return ONLY valid JSON, no additional text
+**YOUTUBE VIDEO SUGGESTION GUIDELINES - CRITICAL ACCURACY REQUIREMENTS:**
+- The youtubeVideo MUST be a REAL, CURRENTLY AVAILABLE video on YouTube that is watchable in all regions
+- ONLY suggest videos from these TOP verified chess creators (millions of subscribers, proven extensive content libraries):
+  GothamChess (Levy Rozman), agadmator (Antonio Radic), ChessNetwork, Saint Louis Chess Club, Eric Rosen
+- DO NOT invent or hallucinate video titles - only suggest videos you are EXTREMELY CONFIDENT actually exist
+- Video title MUST be EXACT as it appears on YouTube - must be searchable by exact title
+- Video MUST be publicly available, NOT age-restricted, region-restricted, or private
+- VERIFIED EXAMPLES of REAL videos that definitely exist (use these as templates):
+  "Why You Lose Games" (GothamChess), "Chess Fundamentals" (agadmator), "Weak Squares Explained" (ChessNetwork),
+  "Opening Principles" (Eric Rosen), "Positional Play" (Saint Louis Chess Club)
+- If NOT 100% certain about exact title, suggest a general concept-based title like the examples above
+- Video MUST directly address the PRIMARY WEAKNESS (recurringWeaknesses[0].title)
+- Prioritize educational/instructional videos over game analysis
+- CONFIDENCE CHECK: Only include youtubeVideo if you are absolutely certain the video exists on YouTube
 
 Begin your analysis now.`;
 };
@@ -5524,6 +5538,13 @@ const performPawnsposesAIAnalysis = async (games, fenData, formData) => {
 
 
 export default Reports;
+
+
+
+
+
+
+
 
 
 

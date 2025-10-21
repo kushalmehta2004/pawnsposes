@@ -256,3 +256,253 @@ export const searchBestYouTubeForWeakness = async (weaknessTitleRaw) => {
   const best = ranked[0];
   return best ? { title: best.title, url: best.url } : null;
 };
+
+// Verify that a specific video from Gemini actually exists on YouTube and is accessible
+export const verifyGeminiVideoSuggestion = async (geminiTitle, geminiCreator) => {
+  try {
+    const key = process.env.REACT_APP_YOUTUBE_API_KEY;
+    if (!key || key === 'your_youtube_api_key_here') {
+      console.warn('REACT_APP_YOUTUBE_API_KEY is missing - cannot verify video');
+      return null;
+    }
+
+    if (!geminiTitle || !geminiCreator) {
+      console.warn('Missing gemini title or creator');
+      return null;
+    }
+
+    console.log(`🔍 Verifying Gemini video suggestion: "${geminiTitle}" by ${geminiCreator}`);
+
+    // Build search URL for exact match: search for the exact title AND channel name
+    const searchQuery = `${geminiTitle.trim()} ${geminiCreator.trim()}`;
+    const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=20&type=video&videoEmbeddable=true&relevanceLanguage=en&safeSearch=moderate&order=relevance&videoSyndicated=true&q=${encodeURIComponent(
+      searchQuery
+    )}&key=${key}`;
+
+    const buildVideosUrl = (ids) =>
+      `https://www.googleapis.com/youtube/v3/videos?part=contentDetails,statistics,snippet,status&id=${ids}&key=${key}`;
+
+    // Search for the video
+    const searchData = await fetchJson(searchUrl);
+    const items = Array.isArray(searchData?.items) ? searchData.items : [];
+    const videoIds = items.map((it) => it?.id?.videoId).filter(Boolean);
+
+    if (videoIds.length === 0) {
+      console.warn(`❌ No videos found for: "${geminiTitle}" by ${geminiCreator}`);
+      return null;
+    }
+
+    // Get detailed info about found videos
+    const videosUrl = buildVideosUrl(videoIds.join(','));
+    const videosData = await fetchJson(videosUrl);
+    const videos = Array.isArray(videosData?.items) ? videosData.items : [];
+
+    // Filter for accessible, verified videos
+    const candidates = videos
+      .map((v) => {
+        const title = v?.snippet?.title || '';
+        const channelTitle = v?.snippet?.channelTitle || '';
+        const description = v?.snippet?.description || '';
+        const durationSec = durationToSeconds(v?.contentDetails?.duration);
+        const viewCount = parseInt(v?.statistics?.viewCount || '0', 10);
+        const live = (v?.snippet?.liveBroadcastContent || 'none') !== 'none';
+        const embeddable = v?.status?.embeddable !== false;
+        const regionRestricted = v?.contentDetails?.regionRestriction ? true : false;
+        const url = `https://www.youtube.com/watch?v=${v.id}`;
+
+        // Calculate title similarity (basic check if title contains key words from gemini suggestion)
+        const geminiBits = geminiTitle.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+        const titleBits = title.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+        const commonWords = geminiBits.filter(w => titleBits.some(t => t.includes(w) || w.includes(t)));
+        const titleSimilarity = commonWords.length / Math.max(geminiBits.length, 1);
+
+        return {
+          id: v.id,
+          title,
+          channelTitle,
+          description,
+          durationSec,
+          viewCount,
+          live,
+          embeddable,
+          regionRestricted,
+          url,
+          titleSimilarity,
+          channelMatch: channelTitle.toLowerCase().includes(geminiCreator.toLowerCase()) || 
+                       geminiCreator.toLowerCase().includes(channelTitle.toLowerCase())
+        };
+      })
+      .filter((x) => {
+        // Must have URL and be accessible
+        if (!x.url || x.live) return false;
+        
+        // Must be embeddable
+        if (!x.embeddable) {
+          console.warn(`⚠️ Video "${x.title}" is not embeddable (restricted)`);
+          return false;
+        }
+
+        // Should NOT be region restricted
+        if (x.regionRestricted) {
+          console.warn(`⚠️ Video "${x.title}" has region restrictions`);
+          return false;
+        }
+
+        // Must be at least 120 seconds (2 minutes) for educational content
+        if (x.durationSec < 120) {
+          console.warn(`⚠️ Video "${x.title}" is too short (${x.durationSec}s)`);
+          return false;
+        }
+
+        // Should have reasonable view count (at least 1000 views)
+        if (x.viewCount < 1000) {
+          console.warn(`⚠️ Video "${x.title}" has low view count (${x.viewCount})`);
+          return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        // Prioritize channel match, then title similarity, then view count
+        if (a.channelMatch !== b.channelMatch) {
+          return a.channelMatch ? -1 : 1;
+        }
+        if (a.titleSimilarity !== b.titleSimilarity) {
+          return b.titleSimilarity - a.titleSimilarity;
+        }
+        return b.viewCount - a.viewCount;
+      });
+
+    if (candidates.length === 0) {
+      console.warn(`❌ No accessible videos found matching: "${geminiTitle}" by ${geminiCreator}`);
+      return null;
+    }
+
+    const best = candidates[0];
+    console.log(`✅ Verified Gemini video: "${best.title}" by ${best.channelTitle}`);
+    console.log(`   URL: ${best.url} | Views: ${best.viewCount} | Duration: ${best.durationSec}s`);
+    console.log(`   Channel Match: ${best.channelMatch} | Title Similarity: ${(best.titleSimilarity * 100).toFixed(0)}%`);
+
+    return {
+      title: best.title,
+      creator: best.channelTitle,
+      url: best.url,
+      viewCount: best.viewCount,
+      duration: best.durationSec,
+      verified: true
+    };
+
+  } catch (e) {
+    console.error('❌ Video verification failed:', e.message);
+    return null;
+  }
+};
+
+// Fallback search: Find best verified video for a weakness topic
+export const searchFallbackVideo = async (weaknessTopic) => {
+  try {
+    const key = process.env.REACT_APP_YOUTUBE_API_KEY;
+    if (!key || key === 'your_youtube_api_key_here') {
+      console.warn('REACT_APP_YOUTUBE_API_KEY is missing - cannot search videos');
+      return null;
+    }
+
+    if (!weaknessTopic || typeof weaknessTopic !== 'string' || weaknessTopic.trim().length === 0) {
+      console.warn('Invalid weakness topic provided');
+      return null;
+    }
+
+    console.log(`🔍 Searching fallback video for weakness: "${weaknessTopic}"`);
+
+    // Search with the weakness topic + "chess tutorial" to get educational videos
+    const searchQuery = `${weaknessTopic.trim()} chess tutorial`;
+    const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=25&type=video&videoEmbeddable=true&relevanceLanguage=en&safeSearch=moderate&order=viewCount&videoSyndicated=true&q=${encodeURIComponent(
+      searchQuery
+    )}&key=${key}`;
+
+    const buildVideosUrl = (ids) =>
+      `https://www.googleapis.com/youtube/v3/videos?part=contentDetails,statistics,snippet,status&id=${ids}&key=${key}`;
+
+    // Search for videos
+    const searchData = await fetchJson(searchUrl);
+    const items = Array.isArray(searchData?.items) ? searchData.items : [];
+    const videoIds = items.map((it) => it?.id?.videoId).filter(Boolean);
+
+    if (videoIds.length === 0) {
+      console.warn(`❌ No fallback videos found for: "${weaknessTopic}"`);
+      return null;
+    }
+
+    // Get detailed info
+    const videosUrl = buildVideosUrl(videoIds.join(','));
+    const videosData = await fetchJson(videosUrl);
+    const videos = Array.isArray(videosData?.items) ? videosData.items : [];
+
+    // Apply same strict quality filters
+    const candidates = videos
+      .map((v) => {
+        const title = v?.snippet?.title || '';
+        const channelTitle = v?.snippet?.channelTitle || '';
+        const durationSec = durationToSeconds(v?.contentDetails?.duration);
+        const viewCount = parseInt(v?.statistics?.viewCount || '0', 10);
+        const live = (v?.snippet?.liveBroadcastContent || 'none') !== 'none';
+        const embeddable = v?.status?.embeddable !== false;
+        const videoId = v?.id;
+
+        return {
+          videoId,
+          title,
+          channelTitle,
+          durationSec,
+          viewCount,
+          live,
+          embeddable,
+          url: `https://www.youtube.com/watch?v=${videoId}`
+        };
+      })
+      .filter((v) => {
+        // Apply same strict verification filters
+        if (!v.embeddable) {
+          console.warn(`⚠️ Fallback video "${v.title}" is not embeddable (restricted)`);
+          return false;
+        }
+        if (v.live) {
+          console.warn(`⚠️ Fallback video "${v.title}" is a live stream`);
+          return false;
+        }
+        if (v.durationSec < 120) {
+          console.warn(`⚠️ Fallback video "${v.title}" is too short (${v.durationSec}s)`);
+          return false;
+        }
+        if (v.viewCount < 1000) {
+          console.warn(`⚠️ Fallback video "${v.title}" has low view count (${v.viewCount})`);
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => b.viewCount - a.viewCount); // Sort by view count (already ordered by API)
+
+    if (candidates.length === 0) {
+      console.warn(`❌ No accessible fallback videos found for: "${weaknessTopic}"`);
+      return null;
+    }
+
+    const best = candidates[0];
+    console.log(`✅ Found fallback video: "${best.title}" by ${best.channelTitle}`);
+    console.log(`   URL: ${best.url} | Views: ${best.viewCount} | Duration: ${best.durationSec}s`);
+
+    return {
+      title: best.title,
+      creator: best.channelTitle,
+      url: best.url,
+      viewCount: best.viewCount,
+      duration: best.durationSec,
+      verified: true,
+      isFallback: true
+    };
+
+  } catch (e) {
+    console.error('❌ Fallback video search failed:', e.message);
+    return null;
+  }
+};
