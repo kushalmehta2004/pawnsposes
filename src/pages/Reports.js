@@ -2067,8 +2067,8 @@ ${game.criticalMoments.slice(0, 3).map(moment => `
 **EXAMPLE_3:** vs. [opponent] (Move [number]) - Mistake: [TWO-LINE JUSTIFICATION explaining exactly why this move was a mistake and what was wrong with the decision-making]
 
 CRITICAL: For each EXAMPLE, provide EXACTLY 2 lines of explanation after "Mistake:". Each line should be a complete thought.
-Line 1: What was the concrete problem with the move?
-Line 2: What principle or objective was violated?
+What was the concrete problem with the move?
+What principle or objective was violated?
 
 Examples of TWO-LINE format:
 - "Moved the bishop to an undefended square, allowing it to be captured with tempo. This violated the principle of piece safety and the tactical calculation principle."
@@ -5368,7 +5368,7 @@ Return your analysis in the following JSON format:
           "moveNumber": 15,
           "move": "15...g5?",
           "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-          "whyMistake": "Explanation of why this move was a strategic mistake in this specific position.",
+          "explanation": "EXACTLY 2 LINES REQUIRED. Line 1: Describe the tactical or strategic flaw with specific square and piece references. Line 2: Explain the immediate consequence or what the opponent gains from this move. Example: 'Rachitmehta unnecessarily trades queens, relieving White of pressure from open files and active pieces.\n This allows White to safely maneuver toward weak squares and consolidate.',
           "betterPlan": "Suggest the superior plan and explain the future idea (e.g., 'Exchange the bishop to permanently weaken dark squares')"
         }
       ]
@@ -5524,4 +5524,8 @@ const performPawnsposesAIAnalysis = async (games, fenData, formData) => {
 
 
 export default Reports;
+
+
+
+
 
