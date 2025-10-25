@@ -393,3 +393,217 @@
 .dark-mode .border-blue-300 {
   border-color: #1E40AF !important;
 }
+
+/* DashboardPuzzleSolver & SinglePuzzleSolverModal - Dark Mode Fixes */
+
+/* ============================================ */
+/* MODAL OVERLAY - DARKENS THE BACKGROUND */
+/* ============================================ */
+.dark-mode .fixed.inset-0.bg-black {
+  background-color: rgba(0, 0, 0, 0.7) !important;
+  backdrop-filter: blur(6px) !important;
+  -webkit-backdrop-filter: blur(6px) !important;
+}
+
+.dark-mode .fixed.inset-0.bg-black.bg-opacity-60 {
+  background-color: rgba(0, 0, 0, 0.7) !important;
+}
+
+/* Ensure modal overlay has proper z-index and prevents clickthrough */
+.dark-mode .fixed.inset-0.bg-black.z-50 {
+  pointer-events: auto !important;
+  z-index: 40 !important;
+}
+
+/* ============================================ */
+/* PRIMARY MODAL CONTAINER - MAKE IT OPAQUE */
+/* ============================================ */
+/* Target the main rounded modal box that contains everything */
+.dark-mode .fixed.inset-0 > div.bg-white.rounded-lg.shadow-2xl,
+.dark-mode .fixed.inset-0 > div > div.bg-white.rounded-lg.shadow-2xl,
+.dark-mode div.max-w-4xl.w-full.bg-white.dark\:bg-zinc-900,
+.dark-mode div.max-w-4xl.bg-white.dark\:bg-zinc-900 {
+  background-color: #18181B !important;
+  color: #E4E4E7 !important;
+  border-color: #3F3F46 !important;
+  opacity: 1 !important;
+}
+
+/* Universal catch: ALL bg-white inside .fixed.inset-0 in dark mode get forced dark */
+.dark-mode .fixed.inset-0 div.bg-white {
+  background-color: #18181B !important;
+  opacity: 1 !important;
+}
+
+/* Force overflow containers to be dark */
+.dark-mode .overflow-y-auto.bg-white,
+.dark-mode .overflow-y-auto.dark\:bg-zinc-900 {
+  background-color: #18181B !important;
+  opacity: 1 !important;
+}
+
+/* ============================================ */
+/* MODAL HEADER - SLIGHTLY LIGHTER */
+/* ============================================ */
+.dark-mode .sticky.top-0.bg-white.dark\:bg-zinc-800,
+.dark-mode .sticky.top-0.bg-white.border-b,
+.dark-mode .sticky.top-0.border-b.dark\:border-zinc-700 {
+  background-color: #27272A !important;
+  border-bottom-color: #3F3F46 !important;
+  opacity: 1 !important;
+}
+
+/* ============================================ */
+/* MODAL CONTENT AREA - MAIN DARK BG */
+/* ============================================ */
+.dark-mode .p-5.bg-white.dark\:bg-zinc-900,
+.dark-mode .p-5.bg-white {
+  background-color: #18181B !important;
+  color: #E4E4E7 !important;
+  opacity: 1 !important;
+}
+
+/* Grid containers inside modal */
+.dark-mode .grid.grid-cols-1.lg\:grid-cols-3 {
+  background-color: transparent;
+}
+
+/* ============================================ */
+/* MODAL PANELS/CARDS - SECONDARY DARK BG */
+/* ============================================ */
+.dark-mode .bg-white.dark\:bg-zinc-800.border,
+.dark-mode .bg-white.dark\:bg-zinc-800,
+.dark-mode .bg-gray-50.dark\:bg-zinc-800,
+.dark-mode .bg-gray-50.rounded-lg {
+  background-color: #27272A !important;
+  border-color: #3F3F46 !important;
+  color: #E4E4E7 !important;
+  opacity: 1 !important;
+}
+
+/* ============================================ */
+/* TEXT COLORS - ENSURE READABILITY */
+/* ============================================ */
+.dark-mode .dark\:text-white,
+.dark-mode .text-gray-800.dark\:text-white {
+  color: #FFFFFF !important;
+}
+
+.dark-mode .text-gray-600.dark\:text-gray-300,
+.dark-mode .dark\:text-gray-300 {
+  color: #D4D4D8 !important;
+}
+
+.dark-mode .dark\:text-gray-200 {
+  color: #E4E4E7 !important;
+}
+
+.dark-mode .dark\:text-gray-400 {
+  color: #A1A1AA !important;
+}
+
+.dark-mode h2.text-gray-800.dark\:text-white {
+  color: #FFFFFF !important;
+}
+
+.dark-mode h3.text-gray-700.dark\:text-gray-200 {
+  color: #E4E4E7 !important;
+}
+
+/* ============================================ */
+/* BORDER STYLING - MATCH COLOR SCHEME */
+/* ============================================ */
+.dark-mode .dark\:border-zinc-700,
+.dark-mode .border.dark\:border-zinc-700,
+.dark-mode .border-b.dark\:border-zinc-700 {
+  border-color: #3F3F46 !important;
+}
+
+.dark-mode .border-gray-200.dark\:border-zinc-700 {
+  border-color: #3F3F46 !important;
+}
+
+/* ============================================ */
+/* BUTTON STYLING - VIVID COLORS */
+/* ============================================ */
+/* Orange buttons (Show Solution) */
+.dark-mode .bg-orange-500.dark\:bg-orange-600,
+.dark-mode .dark\:bg-orange-600,
+.dark-mode .dark\:bg-orange-700 {
+  background-color: #EA580C !important;
+}
+
+.dark-mode .bg-orange-500.dark\:bg-orange-600:hover,
+.dark-mode .dark\:bg-orange-600:hover,
+.dark-mode .dark\:hover\:bg-orange-700:hover {
+  background-color: #C24A0A !important;
+}
+
+/* Blue buttons (Step Back) */
+.dark-mode .bg-blue-500.dark\:bg-blue-700,
+.dark-mode .dark\:bg-blue-700 {
+  background-color: #1D4ED8 !important;
+}
+
+.dark-mode .bg-blue-500.dark\:bg-blue-700:hover,
+.dark-mode .dark\:hover\:bg-blue-600:hover {
+  background-color: #1E40AF !important;
+}
+
+/* Green buttons (Reset) */
+.dark-mode .bg-green-500.dark\:bg-green-700,
+.dark-mode .dark\:bg-green-700 {
+  background-color: #15803D !important;
+}
+
+.dark-mode .bg-green-500.dark\:bg-green-700:hover,
+.dark-mode .dark\:hover\:bg-green-600:hover {
+  background-color: #166534 !important;
+}
+
+/* Purple buttons (Hint) */
+.dark-mode .bg-purple-500.dark\:bg-purple-700,
+.dark-mode .dark\:bg-purple-700 {
+  background-color: #7C3AED !important;
+}
+
+.dark-mode .dark\:bg-zinc-700 {
+  background-color: #3F3F46 !important;
+}
+
+/* Close button */
+.dark-mode .bg-gray-800.dark\:bg-zinc-700 {
+  background-color: #3F3F46 !important;
+}
+
+/* ============================================ */
+/* FEEDBACK & INFO SECTIONS */
+/* ============================================ */
+.dark-mode .bg-green-50.dark\:bg-green-900\/30,
+.dark-mode .bg-blue-50.dark\:bg-blue-900\/30 {
+  background-color: rgba(16, 185, 129, 0.15) !important;
+  border-color: #047857 !important;
+}
+
+.dark-mode .text-green-800.dark\:text-green-300,
+.dark-mode .text-blue-800.dark\:text-blue-300 {
+  color: #86EFAC !important;
+}
+
+.dark-mode .bg-purple-50.dark\:bg-purple-900\/30 {
+  background-color: rgba(147, 51, 234, 0.15) !important;
+}
+
+.dark-mode .text-purple-800.dark\:text-purple-300 {
+  color: #D8B4FE !important;
+}
+
+/* Theme badges */
+.dark-mode .bg-blue-100.dark\:bg-blue-900\/40 {
+  background-color: rgba(30, 58, 138, 0.4) !important;
+  border-color: #1E3A8A !important;
+}
+
+.dark-mode .text-blue-700.dark\:text-blue-300 {
+  color: #93C5FD !important;
+}
