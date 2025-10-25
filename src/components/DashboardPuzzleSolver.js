@@ -4,7 +4,7 @@
  * Displays a puzzle in a modal with full interaction capabilities
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { X, Eye, Undo2, RotateCcw } from 'lucide-react';
 import { Chess } from 'chess.js';
 import toast from 'react-hot-toast';
@@ -19,6 +19,35 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
   const [moveResult, setMoveResult] = useState(null);
   const [orientation, setOrientation] = useState('white');
   const [isInitialized, setIsInitialized] = useState(false);
+
+  const nextHintMove = useMemo(() => {
+    if (!puzzle?.lineUci) return null;
+    const tokens = puzzle.lineUci.split(/\s+/).filter(Boolean);
+    const index = typeof puzzle?.lineIndex === 'number' ? puzzle.lineIndex : 0;
+    const nextUci = tokens[index];
+    if (!nextUci) return null;
+
+    try {
+      const engine = new Chess(puzzle.position || puzzle.initialPosition || undefined);
+      const from = nextUci.slice(0, 2);
+      const to = nextUci.slice(2, 4);
+      const promotion = nextUci.length > 4 ? nextUci[4] : undefined;
+      const move = engine.move({ from, to, promotion });
+      return {
+        uci: nextUci.toLowerCase(),
+        san: move?.san || null
+      };
+    } catch (err) {
+      console.warn('Unable to derive SAN for hint move', err);
+      return {
+        uci: nextUci.toLowerCase(),
+        san: null
+      };
+    }
+  }, [puzzle?.lineUci, puzzle?.lineIndex, puzzle?.position, puzzle?.initialPosition]);
+
+  const hasTextHint = typeof puzzle?.hint === 'string' && puzzle.hint.trim().length > 0;
+  const canShowHint = Boolean(nextHintMove) || hasTextHint;
 
   // Initialize puzzle - MATCHES SinglePuzzleSolverModal logic
   useEffect(() => {
@@ -534,7 +563,7 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
                 </div>
 
                 {/* Hint Button */}
-                {puzzle?.hint && (
+                {canShowHint && (
                   <button
                     type="button"
                     onClick={() => setShowHint(!showHint)}
@@ -549,10 +578,32 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
                 )}
 
                 {/* Hint Display */}
-                {showHint && puzzle?.hint && (
+                {showHint && canShowHint && (
                   <div className="p-3 bg-purple-50 dark:bg-purple-900/30 border border-purple-300 dark:border-purple-700 rounded-lg mt-2">
-                    <h4 className="text-xs font-semibold text-purple-900 dark:text-purple-200 mb-1">Hint:</h4>
-                    <p className="text-xs text-purple-800 dark:text-purple-300">{puzzle.hint}</p>
+                    <h4 className="text-xs font-semibold text-purple-900 dark:text-purple-200 mb-1">Next Move Hint:</h4>
+                    {nextHintMove ? (
+                      <>
+                        <p className="text-xs text-purple-800 dark:text-purple-300 font-mono">
+                          {nextHintMove.san || nextHintMove.uci}
+                        </p>
+                        {nextHintMove.san && (
+                          <p className="text-[10px] text-purple-600 dark:text-purple-400 mt-1">
+                            (SAN: {nextHintMove.san})
+                          </p>
+                        )}
+                        <p className="text-[10px] text-purple-600 dark:text-purple-400 mt-1">
+                          UCI: {nextHintMove.uci}
+                        </p>
+                      </>
+                    ) : hasTextHint ? (
+                      <p className="text-xs text-purple-800 dark:text-purple-300">
+                        {puzzle.hint}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-purple-800 dark:text-purple-300">
+                        No additional moves remaining.
+                      </p>
+                    )}
                   </div>
                 )}
 
