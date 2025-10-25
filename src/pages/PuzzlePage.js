@@ -9,6 +9,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { PuzzleDataContext } from '../contexts/PuzzleDataContext';
 import userProfileService from '../services/userProfileService';
 import puzzleGenerationService from '../services/puzzleGenerationService';
+import puzzleAccessService from '../services/puzzleAccessService';
 import UpgradePrompt from '../components/UpgradePrompt';
 import { initializePuzzleDatabase, getPuzzleDatabase } from '../utils/puzzleDatabase';
 
@@ -23,6 +24,7 @@ const PuzzlePage = () => {
   const [feedback, setFeedback] = useState('');
   const [showSolution, setShowSolution] = useState(false);
   const [solutionText, setSolutionText] = useState('');
+  const [showHint, setShowHint] = useState(false);
 
   const [puzzles, setPuzzles] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -506,6 +508,77 @@ const PuzzlePage = () => {
         // Mark these puzzles as used for future puzzle page loads
         const usedIds = filteredPuzzles.map(p => p.id);
         puzzleContext.markPuzzlesAsUsed(usedIds);
+      }
+
+      // 🔴 PRODUCTION FIX: Store the exact puzzles being displayed to Supabase
+      // This ensures Dashboard will fetch the same puzzles the user is seeing
+      // CRITICAL: Store puzzles organized by difficulty so Dashboard shows easy/medium/hard correctly
+      if (user?.id && (puzzleType === 'fix-weaknesses' || puzzleType === 'master-openings' || puzzleType === 'sharpen-endgame')) {
+        try {
+          console.log(`💾 Storing displayed puzzles to Supabase for ${puzzleType}...`);
+          
+          // Get the most recent report ID for this user
+          const reportId = await puzzleAccessService.getMostRecentReportId(user.id);
+          
+          if (reportId) {
+            // Map puzzle type to category name
+            const categoryMap = {
+              'fix-weaknesses': 'weakness',
+              'master-openings': 'opening',
+              'sharpen-endgame': 'endgame'
+            };
+            const category = categoryMap[puzzleType];
+            
+            // 🎯 CRITICAL FIX: Partition puzzles by difficulty BEFORE storing
+            // This ensures Dashboard gets the same easy/medium/hard split
+            let puzzlesToStore = filteredPuzzles;
+            
+            if (puzzleType !== 'learn-mistakes') {
+              // Partition puzzles by rating to match UI display
+              const easyPuzzles = filteredPuzzles.filter(p => {
+                const rating = p.rating || 0;
+                return rating >= 700 && rating < 1500;
+              }).slice(0, 10);
+              
+              const mediumPuzzles = filteredPuzzles.filter(p => {
+                const rating = p.rating || 0;
+                return rating >= 1500 && rating < 2000;
+              }).slice(0, 10);
+              
+              const hardPuzzles = filteredPuzzles.filter(p => {
+                const rating = p.rating || 0;
+                return rating >= 2100;
+              }).slice(0, 10);
+              
+              // Combine in order: easy, then medium, then hard (as they appear in UI tabs)
+              puzzlesToStore = [...easyPuzzles, ...mediumPuzzles, ...hardPuzzles];
+              
+              console.log(`📊 Partitioned puzzles for storage: Easy=${easyPuzzles.length}, Medium=${mediumPuzzles.length}, Hard=${hardPuzzles.length}, Total=${puzzlesToStore.length}`);
+            }
+            
+            // For free users, store only the first puzzle (teaser)
+            if (!canAccess) {
+              puzzlesToStore = puzzlesToStore.slice(0, 1);
+            }
+            
+            // Store the puzzles to Supabase
+            const storedCount = await puzzleAccessService.storePuzzlesToSupabase(
+              user.id,
+              puzzlesToStore,
+              category,
+              reportId
+            );
+            
+            console.log(`✅ Stored ${storedCount} puzzles to Supabase for Dashboard synchronization`);
+          } else {
+            console.warn('⚠️ Could not find report ID. Puzzles will not be stored to Supabase.');
+            console.warn('   This might happen if user navigated directly to puzzle page without generating a report.');
+          }
+        } catch (storeError) {
+          console.error('❌ Failed to store puzzles to Supabase:', storeError);
+          // Don't block the UI - let user see puzzles even if storage failed
+          console.warn('   Puzzles will still be displayed, but Dashboard synchronization may be affected.');
+        }
       }
 
       // For free users: show only 1 teaser puzzle
@@ -1200,6 +1273,28 @@ const PuzzlePage = () => {
                 </button>
               </div>
 
+              {/* Hint Button */}
+              {puzzle?.hint && (
+                <button
+                  onClick={() => setShowHint(!showHint)}
+                  className={`w-full mb-4 px-4 py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center text-white ${
+                    showHint
+                      ? 'bg-purple-600 hover:bg-purple-700'
+                      : 'bg-purple-500 hover:bg-purple-600'
+                  }`}
+                >
+                  💡 {showHint ? 'Hide Hint' : 'Show Hint'}
+                </button>
+              )}
+
+              {/* Hint Display */}
+              {showHint && puzzle?.hint && (
+                <div className="mb-4 p-4 bg-purple-50 border border-purple-300 rounded-lg animate-in fade-in-50 duration-200">
+                  <h4 className="text-sm font-semibold text-purple-900 mb-2">Hint:</h4>
+                  <p className="text-sm text-purple-800">{puzzle.hint}</p>
+                </div>
+              )}
+
               {/* Solution Display */}
               {showSolution && (
                 <div className="mb-4 p-4 bg-green-50 border border-green-300 rounded-lg animate-in fade-in-50 duration-200">
@@ -1223,17 +1318,19 @@ const PuzzlePage = () => {
               </div>
 
               {/* Themes - Display as Badges */}
-              {puzzle?.themes && (
+              {puzzle?.themes && (Array.isArray(puzzle.themes) ? puzzle.themes.length > 0 : puzzle.themes.trim() !== '') && (
                 <div className="border-t border-gray-200 pt-4">
                   <h4 className="text-sm font-semibold text-gray-800 mb-3">Themes:</h4>
                   <div className="flex flex-wrap gap-2">
-                    {puzzle.themes.split(/,\s*|\s+/).map((theme, idx) => (
-                      theme.trim() && (
+                    {(Array.isArray(puzzle.themes) ? puzzle.themes : puzzle.themes.split(/,\s*|\s+/)).map((theme, idx) => (
+                      (typeof theme === 'string' ? theme.trim() : theme) && (
                         <span
                           key={idx}
                           className="inline-block px-3 py-1.5 bg-blue-100 text-blue-700 border border-blue-300 rounded-md text-xs font-medium"
                         >
-                          {theme.charAt(0).toUpperCase() + theme.slice(1)}
+                          {typeof theme === 'string' 
+                            ? theme.charAt(0).toUpperCase() + theme.slice(1)
+                            : theme}
                         </span>
                       )
                     ))}

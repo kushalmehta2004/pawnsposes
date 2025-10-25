@@ -1,14 +1,15 @@
 /**
  * PDF Service
  * Handles PDF generation from HTML content and storage in Supabase
+ * Uses html2pdf for better HTML preservation and multi-page support
  */
 
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
+import html2pdf from 'html2pdf.js';
 import { supabase } from './supabaseClient';
 
 /**
- * Generates a PDF from the current page content
+ * Generates a PDF from the current page content using html2pdf
+ * This preserves HTML structure, makes text selectable, and handles page breaks naturally
  * @param {string} reportTitle - Title for the PDF file
  * @returns {Promise<Blob>} - PDF blob
  */
@@ -16,7 +17,7 @@ export const generatePDFFromCurrentPage = async (reportTitle = 'Chess Analysis R
   try {
     console.log('🔄 Starting PDF generation...');
 
-    // Get the report content element specifically (not the entire page)
+    // Get the report content element
     const element = document.getElementById('report-content') ||
       document.querySelector('.report-content') ||
       document.querySelector('[id*="report"]') ||
@@ -28,142 +29,111 @@ export const generatePDFFromCurrentPage = async (reportTitle = 'Chess Analysis R
     }
 
     console.log('📄 Targeting element for PDF:', element.id || element.className || 'document.body');
-    console.log('📐 Element dimensions:', {
-      width: element.offsetWidth,
-      height: element.offsetHeight,
-      scrollWidth: element.scrollWidth,
-      scrollHeight: element.scrollHeight
+
+    // Create a clone of the element to manipulate without affecting the original
+    const clonedElement = element.cloneNode(true);
+
+    // Convert PDF-safe buttons to links (for buttons with pdf-link class)
+    const pdfLinkButtons = clonedElement.querySelectorAll('button.pdf-link');
+    pdfLinkButtons.forEach(btn => {
+      const href = btn.getAttribute('data-href');
+      if (href) {
+        const link = document.createElement('a');
+        link.href = href;
+        link.textContent = btn.textContent;
+        link.style.color = '#3b82f6';
+        link.style.textDecoration = 'underline';
+        link.style.cursor = 'pointer';
+        link.setAttribute('target', '_blank');
+        link.setAttribute('rel', 'noopener,noreferrer');
+        btn.replaceWith(link);
+      }
     });
 
-    // Temporarily hide buttons and interactive elements for PDF
-    const elementsToHide = document.querySelectorAll('button, .no-print, [data-no-print], nav, header, footer, .print-button-container');
-    const originalDisplays = [];
-
-    elementsToHide.forEach((el, index) => {
-      originalDisplays[index] = el.style.display;
+    // Hide buttons and interactive elements in the clone
+    const elementsToHide = clonedElement.querySelectorAll('button, .no-print, [data-no-print], nav, header, footer, .print-button-container, .back-link');
+    elementsToHide.forEach(el => {
       el.style.display = 'none';
     });
 
-    // Force light mode for PDF
-    const wasDark = document.body.classList.contains('dark-mode');
-    if (wasDark) {
-      document.body.classList.remove('dark-mode');
-    }
-
-    // Add temporary styles for clean PDF generation
-    const tempStyle = document.createElement('style');
-    tempStyle.id = 'pdf-generation-styles';
-    tempStyle.textContent = `
-      #report-content {
-        background: white !important;
-        color: black !important;
-        padding: 20px !important;
-        margin: 0 !important;
-        box-shadow: none !important;
-        border: none !important;
+    // Add styles to ensure proper PDF formatting
+    const styleEl = document.createElement('style');
+    styleEl.textContent = `
+      @media print {
+        body { background: white !important; }
+        * { 
+          box-shadow: none !important; 
+          border-radius: 0 !important;
+        }
+        button, .no-print, [data-no-print] { 
+          display: none !important; 
+        }
       }
-      #report-content * {
-        color: inherit !important;
+      
+      .page-break {
+        page-break-after: always;
       }
-      #report-content .no-print,
-      #report-content button,
-      #report-content nav,
-      #report-content header,
-      #report-content footer {
-        display: none !important;
+      
+      section {
+        page-break-inside: avoid;
+      }
+      
+      h1, h2, h3 {
+        page-break-after: avoid;
+      }
+      
+      table {
+        page-break-inside: avoid;
       }
     `;
-    document.head.appendChild(tempStyle);
+    clonedElement.appendChild(styleEl);
 
-    // Generate canvas from HTML
-    const canvas = await html2canvas(element, {
-      scale: 2, // Keep for good quality
-      useCORS: true,
-      allowTaint: true,
-      backgroundColor: '#ffffff',
-      width: element.offsetWidth || element.scrollWidth,
-      height: element.offsetHeight || element.scrollHeight,
-      scrollX: 0,
-      scrollY: 0,
-      logging: false,
-      removeContainer: true
-    });
-
-    // Restore original styles
-    elementsToHide.forEach((el, index) => {
-      el.style.display = originalDisplays[index];
-    });
-
-    // Remove temporary styles
-    const tempStyleEl = document.getElementById('pdf-generation-styles');
-    if (tempStyleEl) {
-      tempStyleEl.remove();
-    }
-
-    if (wasDark) {
-      document.body.classList.add('dark-mode');
-    }
-
-    // Create PDF
-    const imgData = canvas.toDataURL('image/jpeg', 0.75); // ✅ CHANGED FROM PNG TO JPEG
-    const pdf = new jsPDF({
-      orientation: 'portrait',
-      unit: 'mm',
-      format: 'a4'
-    });
-
-    // Calculate dimensions to fit A4 with margins
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = pdf.internal.pageSize.getHeight();
-    const margin = 10; // 10mm margins
-    const availableWidth = pdfWidth - (margin * 2);
-    const availableHeight = pdfHeight - (margin * 2);
-
-    const imgWidth = canvas.width;
-    const imgHeight = canvas.height;
-    const ratio = Math.min(availableWidth / imgWidth, availableHeight / imgHeight);
-    const scaledWidth = imgWidth * ratio;
-    const scaledHeight = imgHeight * ratio;
-    const imgX = (pdfWidth - scaledWidth) / 2;
-    const imgY = margin;
-
-    // Add image to PDF
-    pdf.addImage(imgData, 'JPEG', imgX, imgY, scaledWidth, scaledHeight); // ✅ CHANGED FROM PNG
-
-    // If content is too tall, add additional pages
-    let remainingHeight = scaledHeight - availableHeight;
-    let currentY = availableHeight;
-
-    while (remainingHeight > 0) {
-      pdf.addPage();
-      const pageHeight = Math.min(remainingHeight, availableHeight);
-
-      // Create a new canvas for the remaining content
-      const remainingCanvas = await html2canvas(element, {
+    // html2pdf options for better formatting
+    const options = {
+      margin: [10, 10, 10, 10], // margins in mm: top, left, bottom, right
+      filename: `${reportTitle.replace(/[^a-z0-9]/gi, '-')}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { 
         scale: 2,
         useCORS: true,
         allowTaint: true,
-        backgroundColor: '#ffffff',
-        width: element.offsetWidth || element.scrollWidth,
-        height: pageHeight / ratio,
-        scrollX: 0,
-        scrollY: currentY / ratio,
-        logging: false,
-        removeContainer: true
-      });
+        backgroundColor: '#ffffff'
+      },
+      jsPDF: { 
+        orientation: 'portrait', 
+        unit: 'mm', 
+        format: 'a4',
+        compress: true
+      },
+      pagebreak: { 
+        mode: ['avoid-all', 'css', 'legacy'] // Better page break handling
+      }
+    };
 
-      const remainingImgData = remainingCanvas.toDataURL('image/jpeg', 0.75); // ✅ CHANGED FROM PNG
-      pdf.addImage(remainingImgData, 'JPEG', imgX, margin, scaledWidth, pageHeight);
-
-      remainingHeight -= availableHeight;
-      currentY += availableHeight;
-    }
-
-    // Convert to blob
-    const pdfBlob = pdf.output('blob');
-    console.log('✅ PDF generated successfully');
-
-    return pdfBlob;
+    // Generate PDF and return as blob
+    console.log('📝 Generating PDF with html2pdf...');
+    
+    return new Promise((resolve, reject) => {
+      html2pdf()
+        .set(options)
+        .from(clonedElement)
+        .toPdf()
+        .get('pdf')
+        .then((pdf) => {
+          const blob = pdf.output('blob');
+          if (blob && blob.size > 0) {
+            console.log('✅ PDF generated successfully, size:', blob.size);
+            resolve(blob);
+          } else {
+            console.error('❌ PDF generation failed - empty blob');
+            reject(new Error('PDF generation produced an empty file'));
+          }
+        })
+        .catch((error) => {
+          console.error('❌ html2pdf error:', error);
+          reject(new Error(`html2pdf failed: ${error.message}`));
+        });
+    });
 
   } catch (error) {
     console.error('❌ Error generating PDF:', error);

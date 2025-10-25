@@ -38,6 +38,7 @@ import puzzleAccessService from '../services/puzzleAccessService';
 import tierBasedPuzzleService from '../services/tierBasedPuzzleService';
 import ChessBoardPreview from '../components/ChessBoardPreview';
 import UpgradePrompt from '../components/UpgradePrompt';
+import DashboardPuzzleSolver from '../components/DashboardPuzzleSolver';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -64,7 +65,8 @@ const Dashboard = () => {
   
   // Tab state
   const [activeTab, setActiveTab] = useState('reports');
-  
+  const [activePuzzle, setActivePuzzle] = useState(null);
+
   // Reports state
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -285,15 +287,87 @@ const Dashboard = () => {
       // Extract puzzle_data from Supabase records
       // Each record has the full puzzle object in the puzzle_data JSONB column
       const extractPuzzleData = (records, defaultCategory) => {
-        return records.map(record => {
+        return records.map((record, idx) => {
+          // ⚠️ CRITICAL: puzzle_data might be stored as JSON string or object
+          let fullData = record.puzzle_data;
+          if (typeof fullData === 'string') {
+            try {
+              fullData = JSON.parse(fullData);
+            } catch (e) {
+              console.warn(`⚠️ Failed to parse puzzle_data for puzzle ${record.puzzle_key}:`, e);
+              fullData = {};
+            }
+          }
+          if (!fullData) fullData = {};
+          
           const normalizedCategory = record.category === 'learn-mistakes' ? 'mistake' : record.category;
+          
+          // Debug log for first few puzzles
+          if (idx < 2) {
+            console.log(`🔍 [EXTRACTPUZZLEDATA] Puzzle ${idx} puzzle_data AFTER PARSING:`, {
+              hasMetadata: !!fullData.metadata,
+              metadataRating: fullData.metadata?.rating,
+              metadataThemes: fullData.metadata?.themes,
+              metadataThemesType: Array.isArray(fullData.metadata?.themes) ? 'array' : typeof fullData.metadata?.themes,
+              rootRating: fullData.rating,
+              rootThemes: fullData.themes,
+              hasThemes: !!fullData.themes,
+              hasTheme: !!fullData.theme,
+              hasRating: !!fullData.rating,
+              rating_estimate: record.rating_estimate,
+              extractedRating: fullData.metadata?.rating || fullData.rating || record.rating_estimate || 1500,
+              extractedThemes: fullData.metadata?.themes || fullData.themes || fullData.theme || []
+            });
+          }
+          
+          // 🎯 CRITICAL: Robust extraction with type validation
+          // Priority order: metadata → root fields → record fields → defaults
+          
+          // Themes extraction with validation
+          let extractedThemes = [];
+          if (Array.isArray(fullData.metadata?.themes) && fullData.metadata.themes.length > 0) {
+            extractedThemes = fullData.metadata.themes;
+          } else if (Array.isArray(fullData.themes) && fullData.themes.length > 0) {
+            extractedThemes = fullData.themes;
+          } else if (typeof fullData.theme === 'string' && fullData.theme.length > 0) {
+            extractedThemes = [fullData.theme];
+          } else if (typeof record.theme === 'string' && record.theme.length > 0) {
+            extractedThemes = [record.theme];
+          }
+          
+          // Themes must be an array
+          if (!Array.isArray(extractedThemes)) {
+            extractedThemes = [];
+          }
+          
+          // Rating extraction with validation
+          let extractedRating = 1500; // Safe default
+          if (typeof fullData.metadata?.rating === 'number' && fullData.metadata.rating > 0) {
+            extractedRating = fullData.metadata.rating;
+          } else if (typeof fullData.rating === 'number' && fullData.rating > 0) {
+            extractedRating = fullData.rating;
+          } else if (typeof record.rating_estimate === 'number' && record.rating_estimate > 0) {
+            extractedRating = record.rating_estimate;
+          }
+          
+          console.log(`🎯 [EXTRACT_FINAL] Puzzle ${fullData.id}: themes=${JSON.stringify(extractedThemes)}, rating=${extractedRating}`);
+          
           return {
-            ...record.puzzle_data, // Spread the full puzzle data
-            id: record.puzzle_data?.id || record.id, // Prefer original puzzle id when available
+            ...fullData, // Spread the full puzzle data
+            id: fullData.id || record.puzzle_key || record.id, // Prefer original puzzle id when available
             supabaseId: record.id, // Keep reference to Supabase record
             category: normalizedCategory || defaultCategory,
             isLocked: record.is_locked,
-            isTeaser: record.is_teaser
+            isTeaser: record.is_teaser,
+            // 🎯 Use validated extracted values
+            themes: extractedThemes,
+            rating: extractedRating,
+            hint: fullData.hint || '',
+            position: fullData.position || fullData.initialPosition || record.fen,
+            fen: fullData.fen || record.fen,
+            solution: fullData.solution || '',
+            lineUci: fullData.lineUci || '',
+            fullPuzzle: fullData // Keep reference to full puzzle data including metadata
           };
         });
       };
@@ -303,6 +377,38 @@ const Dashboard = () => {
       const extractedMistake = extractPuzzleData(mistakeData, 'mistake');
       const extractedOpening = extractPuzzleData(openingData, 'opening');
       const extractedEndgame = extractPuzzleData(endgameData, 'endgame');
+
+      // 🔍 DEBUG: Verify extraction worked correctly
+      const verifyExtraction = (puzzles, name) => {
+        if (puzzles.length === 0) {
+          console.log(`✅ [${name}] No puzzles to verify`);
+          return;
+        }
+        
+        // 🎯 NEW: Analyze difficulty distribution
+        const easy = puzzles.filter(p => (p.rating || 0) >= 700 && (p.rating || 0) < 1500).length;
+        const medium = puzzles.filter(p => (p.rating || 0) >= 1500 && (p.rating || 0) < 2000).length;
+        const hard = puzzles.filter(p => (p.rating || 0) >= 2100).length;
+        
+        const first = puzzles[0];
+        const validRating = typeof first.rating === 'number' && first.rating > 0;
+        const validThemes = Array.isArray(first.themes) && first.themes.length > 0;
+        console.log(`✅ [${name}] Extraction verification:`, {
+          totalPuzzles: puzzles.length,
+          difficultyDistribution: { easy, medium, hard },
+          firstPuzzleId: first.id,
+          firstPuzzleRating: first.rating,
+          firstPuzzleThemes: first.themes,
+          ratingValid: validRating ? '✅' : '⚠️ Rating missing/invalid',
+          themesValid: validThemes ? '✅' : '⚠️ Themes missing/empty',
+          allValid: validRating && validThemes ? '✅ PASS' : '❌ FAIL'
+        });
+      };
+      
+      verifyExtraction(extractedWeakness, 'Weakness');
+      verifyExtraction(extractedMistake, 'Mistake');
+      verifyExtraction(extractedOpening, 'Opening');
+      verifyExtraction(extractedEndgame, 'Endgame');
 
       updatePuzzleData(user.id, extractedWeakness, extractedMistake, extractedOpening, extractedEndgame);
       
@@ -458,6 +564,69 @@ const Dashboard = () => {
     }
   };
 
+  const handleSolveOnPawnsPoses = (puzzle, category) => {
+    if (!puzzle) {
+      toast.error('Puzzle data missing');
+      return;
+    }
+
+    console.log('📊 [DASHBOARD] Original puzzle data:', {
+      id: puzzle.id,
+      themes: puzzle.themes,
+      themesType: Array.isArray(puzzle.themes) ? 'array' : typeof puzzle.themes,
+      rating: puzzle.rating,
+      hint: puzzle.hint ? puzzle.hint.substring(0, 50) : 'none',
+      hasFullPuzzle: !!puzzle.fullPuzzle,
+      fullPuzzleMetadata: puzzle.fullPuzzle?.metadata ? Object.keys(puzzle.fullPuzzle.metadata) : 'N/A'
+    });
+
+    const fen = puzzle.position || puzzle.fen;
+    if (!fen) {
+      toast.error('Puzzle position not available');
+      return;
+    }
+
+    // 🎯 CRITICAL: Preserve extracted themes and rating, with fallback to metadata if needed
+    const normalizedThemes = Array.isArray(puzzle.themes) && puzzle.themes.length > 0
+      ? puzzle.themes
+      : (Array.isArray(puzzle.fullPuzzle?.metadata?.themes) && puzzle.fullPuzzle.metadata.themes.length > 0
+        ? puzzle.fullPuzzle.metadata.themes
+        : (Array.isArray(puzzle.theme) && puzzle.theme.length > 0 ? puzzle.theme : []));
+    
+    const normalizedRating = (typeof puzzle.rating === 'number' && puzzle.rating > 0)
+      ? puzzle.rating
+      : (typeof puzzle.fullPuzzle?.metadata?.rating === 'number' && puzzle.fullPuzzle.metadata.rating > 0
+        ? puzzle.fullPuzzle.metadata.rating
+        : 1500);
+    
+    const normalizedPuzzle = {
+      ...puzzle,
+      id: puzzle.id || puzzle.supabaseId,
+      position: fen,
+      fen,
+      lineUci: puzzle.lineUci || puzzle.solution || puzzle.moves || '',
+      solution: puzzle.solution || (puzzle.lineUci ? puzzle.lineUci.split(' ')[0] : ''),
+      source: 'supabase', // Mark as user-generated puzzle from Supabase
+      // 🎯 Use explicitly validated themes and rating
+      themes: normalizedThemes,
+      rating: normalizedRating,
+      hint: puzzle.hint || puzzle.fullPuzzle?.hint || ''
+    };
+
+    console.log('📊 [DASHBOARD] Normalized puzzle before modal:', {
+      id: normalizedPuzzle.id,
+      rating: normalizedPuzzle.rating,
+      themes: normalizedPuzzle.themes,
+      themesType: Array.isArray(normalizedPuzzle.themes) ? 'array' : typeof normalizedPuzzle.themes,
+      extractedCorrectly: normalizedPuzzle.rating > 1500 && normalizedPuzzle.themes.length > 0 ? '✅' : '⚠️'
+    });
+
+    setActivePuzzle({
+      puzzle: normalizedPuzzle,
+      category
+    });
+  };
+
   const availablePlatforms = [...new Set(reports.map(r => r.platform))];
 
   // Render puzzle section with tier-based locking
@@ -555,20 +724,28 @@ const Dashboard = () => {
                       </div>
                     )}
                     
-                    <button
-                      onClick={() => {
-                        if (fen) {
-                          const lichessFen = fen.replace(/ /g, '_');
-                          const lichessUrl = `https://lichess.org/analysis/${lichessFen}`;
-                          window.open(lichessUrl, '_blank');
-                        } else {
-                          toast.error('Puzzle position not available');
-                        }
-                      }}
-                      className="w-full px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-500 text-white font-semibold rounded-lg hover:from-blue-600 hover:to-indigo-600 transition-all"
-                    >
-                      Solve on Lichess →
-                    </button>
+                    <div className="space-y-3">
+                      <button
+                        onClick={() => handleSolveOnPawnsPoses(puzzle, category)}
+                        className="w-full px-4 py-2 bg-gradient-to-r from-emerald-500 to-green-600 text-white font-semibold rounded-lg hover:from-emerald-600 hover:to-green-700 transition-all"
+                      >
+                        Solve on PawnsPoses
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (fen) {
+                            const lichessFen = fen.replace(/ /g, '_');
+                            const lichessUrl = `https://lichess.org/analysis/${lichessFen}`;
+                            window.open(lichessUrl, '_blank');
+                          } else {
+                            toast.error('Puzzle position not available');
+                          }
+                        }}
+                        className="w-full px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-500 text-white font-semibold rounded-lg hover:from-blue-600 hover:to-indigo-600 transition-all"
+                      >
+                        Solve on Lichess →
+                      </button>
+                    </div>
                   </motion.div>
                 );
               })}
@@ -887,6 +1064,10 @@ const Dashboard = () => {
     );
   }
 
+  const handleCloseSolver = () => {
+    setActivePuzzle(null);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 pt-24 pb-8">
       <div className="container mx-auto px-4 max-w-7xl">
@@ -1014,6 +1195,14 @@ const Dashboard = () => {
           </motion.div>
         </AnimatePresence>
       </div>
+
+      {/* Puzzle Solver Modal */}
+      {activePuzzle && (
+        <DashboardPuzzleSolver
+          entry={activePuzzle}
+          onClose={handleCloseSolver}
+        />
+      )}
     </div>
   );
 };

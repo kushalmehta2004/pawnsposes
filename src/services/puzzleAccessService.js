@@ -958,6 +958,152 @@ class PuzzleAccessService {
       return [];
     }
   }
+
+  /**
+   * 🔴 PRODUCTION FIX: Store displayed puzzles to Supabase with complete data
+   * This ensures puzzles shown on PuzzlePage are persisted and fetched by Dashboard
+   * 
+   * @param {string} userId - User ID
+   * @param {Array} puzzles - Array of puzzle objects to store (the ones being displayed)
+   * @param {string} category - Puzzle category ('weakness', 'mistake', 'opening', 'endgame')
+   * @param {string} reportId - Report ID to associate with these puzzles
+   * @returns {Promise<number>} - Number of puzzles successfully stored
+   */
+  async storePuzzlesToSupabase(userId, puzzles, category, reportId) {
+    if (!userId || !puzzles || !Array.isArray(puzzles) || puzzles.length === 0) {
+      console.warn('⚠️ storePuzzlesToSupabase: Invalid parameters', {
+        hasUserId: !!userId,
+        hasPuzzles: !!puzzles,
+        isArray: Array.isArray(puzzles),
+        count: puzzles?.length || 0
+      });
+      return 0;
+    }
+
+    try {
+      console.log(`💾 Storing ${puzzles.length} puzzles to Supabase for category: ${category}`);
+      
+      // Prepare puzzle records with complete data
+      const puzzleRecords = puzzles.map((puzzle, idx) => {
+        // Extract all puzzle data
+        const puzzleData = {
+          id: puzzle.id,
+          position: puzzle.position || puzzle.initialPosition,
+          initialPosition: puzzle.initialPosition || puzzle.fen,
+          solution: puzzle.solution,
+          lineUci: puzzle.lineUci,
+          fen: puzzle.fen,
+          rating: puzzle.rating,
+          popularity: puzzle.popularity || 50,
+          themes: puzzle.themes,
+          explanation: puzzle.explanation,
+          lineIndex: puzzle.lineIndex,
+          startLineIndex: puzzle.startLineIndex,
+          difficulty: puzzle.difficulty
+        };
+
+        return {
+          user_id: userId,
+          report_id: reportId,
+          puzzle_key: puzzle.id || `${category}_${userId}_${idx}_${Date.now()}`,
+          category: category,
+          difficulty: puzzle.difficulty || 'medium',
+          theme: Array.isArray(puzzle.themes) ? puzzle.themes[0] || '' : puzzle.themes || '',
+          is_locked: false, // Puzzles displayed to user are accessible
+          requires_subscription: false,
+          is_teaser: false,
+          unlock_tier: 'free',
+          fen: puzzle.fen,
+          title: `${category.charAt(0).toUpperCase() + category.slice(1)} Puzzle ${idx + 1}`,
+          source_game_id: puzzle.sourceGameId || null,
+          rating_estimate: puzzle.rating || 1500,
+          puzzle_data: puzzleData, // Store complete puzzle object for Dashboard extraction
+          index_in_category: idx // Maintain order from display
+        };
+      });
+
+      // Strategy: Delete old puzzles for this category, then insert fresh ones
+      // This avoids needing a unique constraint and prevents stale puzzle data
+      console.log(`🧹 Removing old ${category} puzzles for this user/report...`);
+      
+      const { error: deleteError } = await supabase
+        .from('puzzles')
+        .delete()
+        .eq('user_id', userId)
+        .eq('category', category)
+        .eq('report_id', reportId);
+
+      if (deleteError && deleteError.code !== 'PGRST116') { // Ignore "no rows" errors
+        console.warn('⚠️ Warning clearing old puzzles:', deleteError);
+      } else {
+        console.log(`✅ Cleared old puzzles for category: ${category}`);
+      }
+
+      // Insert fresh puzzles
+      const { data, error } = await supabase
+        .from('puzzles')
+        .insert(puzzleRecords)
+        .select();
+
+      if (error) {
+        console.error('❌ Failed to store puzzles to Supabase:', error);
+        console.error('Error details:', {
+          message: error.message,
+          code: error.code,
+          details: error.details
+        });
+        throw error;
+      }
+
+      const storedCount = data?.length || 0;
+      console.log(`✅ Successfully stored ${storedCount} fresh puzzles to Supabase`);
+      console.log(`📊 Category: ${category}, Report ID: ${reportId}, User ID: ${userId.substring(0, 8)}...`);
+
+      // Verify storage by checking if puzzles are retrievable
+      const verifyCount = await this.getAccessiblePuzzleCount(userId, category);
+      console.log(`🔍 Verification: ${verifyCount} total puzzles accessible for category ${category}`);
+
+      return storedCount;
+    } catch (error) {
+      console.error('❌ Error in storePuzzlesToSupabase:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the most recent report ID for a user
+   * Used to associate puzzles with their generating report
+   * 
+   * @param {string} userId - User ID
+   * @returns {Promise<string|null>} - Report ID or null if no reports exist
+   */
+  async getMostRecentReportId(userId) {
+    try {
+      const { data, error } = await supabase
+        .from('reports')
+        .select('id')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (error) {
+        console.error('❌ Error fetching most recent report:', error);
+        return null;
+      }
+
+      if (!data || data.length === 0) {
+        console.warn(`⚠️ No reports found for user ${userId}`);
+        return null;
+      }
+
+      const reportId = data[0].id;
+      console.log(`📊 Most recent report ID: ${reportId.substring(0, 8)}...`);
+      return reportId;
+    } catch (error) {
+      console.error('❌ Failed to get most recent report ID:', error);
+      return null;
+    }
+  }
 }
 
 // Export singleton instance

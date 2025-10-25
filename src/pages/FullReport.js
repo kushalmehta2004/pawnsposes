@@ -1707,6 +1707,7 @@ Return ONLY a JSON object with exactly this format (no markdown, no extra text):
                                       <strong>Position:</strong> {example.fen}
                                     </p>
                                     <button
+                                      className="pdf-link"
                                       onClick={() => {
                                         // Open position on Lichess analysis board
                                         // Lichess expects FEN with spaces replaced by underscores
@@ -1714,6 +1715,7 @@ Return ONLY a JSON object with exactly this format (no markdown, no extra text):
                                         const lichessUrl = `https://lichess.org/analysis/${fenForLichess}`;
                                         window.open(lichessUrl, '_blank', 'noopener,noreferrer');
                                       }}
+                                      data-href={`https://lichess.org/analysis/${(example.fen || '').replace(/ /g, '_')}`}
                                       style={{
                                         backgroundColor: '#3b82f6',
                                         color: 'white',

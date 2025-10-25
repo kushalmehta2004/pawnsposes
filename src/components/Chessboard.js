@@ -17,7 +17,8 @@ const Chessboard = ({
   enableArrows = true,   // enable right-click drawing
   preserveDrawingsOnPositionChange = false, // keep drawings when position updates
   onDrawChange,          // optional callback({ arrows, circles })
-  moveResult = null      // { square, isCorrect } - shows checkmark/X on destination square
+  moveResult = null,     // { square, isCorrect } - shows checkmark/X on destination square
+  disabled = false       // disable all interactions when true
 }) => {
   // Internal chess engine for legal moves and updates
   const [selectedSquare, setSelectedSquare] = useState(null);
@@ -97,6 +98,9 @@ const Chessboard = ({
   };
 
   const onSquareClick = (row, col) => {
+    // Prevent any moves if disabled
+    if (disabled) return;
+
     const square = squareFromRowCol(row, col);
 
     // Clear any drawn arrows and circles on left-click
@@ -342,7 +346,7 @@ const Chessboard = ({
 
   // Pointer handlers for right-click drawing
   const onPointerDownBoard = (e) => {
-    if (!enableArrows) return;
+    if (!enableArrows || disabled) return;
     if (e.button !== 2) return; // right button only
     e.preventDefault();
     const sq = pointToSquare(e.clientX, e.clientY);
