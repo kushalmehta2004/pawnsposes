@@ -166,7 +166,7 @@ export default {
   // Build a combined set of tactic puzzles purely from shards (no IndexedDB)
   async getWeaknessPuzzlesForUser(username, maxPuzzles = 10) {
     // Use a balanced default theme set; username is only for logging elsewhere
-    const defaults = ['fork', 'pin', 'hanging-piece', 'mate-in-2'];
+    const defaults = ['pin', 'hanging-piece'];
 
     const per = Math.max(2, Math.ceil(maxPuzzles / defaults.length));
     const batches = await Promise.all(defaults.map(t => this.getPuzzlesForTheme(t, per)));
