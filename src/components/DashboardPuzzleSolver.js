@@ -633,18 +633,24 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
                   <div className="pt-4 border-t dark:border-zinc-700">
                     <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">Themes:</h4>
                     <div className="flex flex-wrap gap-2">
-                      {(Array.isArray(puzzle.themes) ? puzzle.themes : puzzle.themes.split(/,\s*|\s+/)).map((theme, idx) => (
-                        (typeof theme === 'string' ? theme.trim() : theme) && (
+                      {(() => {
+                        // Handle both array and string formats, splitting each theme by spaces/commas
+                        let themeArray = Array.isArray(puzzle.themes) ? puzzle.themes : [puzzle.themes];
+                        let allThemes = themeArray
+                          .flatMap(t => {
+                            const str = typeof t === 'string' ? t : String(t);
+                            // Split by commas or spaces
+                            return str.split(/[,\s]+/).filter(theme => theme.trim().length > 0);
+                          });
+                        return allThemes.map((theme, idx) => (
                           <span
                             key={idx}
                             className="inline-block px-3 py-1.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 rounded-md text-xs font-medium"
                           >
-                            {typeof theme === 'string' 
-                              ? theme.charAt(0).toUpperCase() + theme.slice(1)
-                              : theme}
+                            {theme.charAt(0).toUpperCase() + theme.slice(1)}
                           </span>
-                        )
-                      ))}
+                        ));
+                      })()}
                     </div>
                   </div>
                 )}
