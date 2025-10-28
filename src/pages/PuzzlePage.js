@@ -40,6 +40,8 @@ const PuzzlePage = () => {
   const [canAccess, setCanAccess] = useState(true);
   const [showUpgradeNotice, setShowUpgradeNotice] = useState(false);
   const [moveResult, setMoveResult] = useState(null); // { square, isCorrect }
+  const [currentStreak, setCurrentStreak] = useState(0);
+  const [bestStreak, setBestStreak] = useState(0);
 
   const puzzle = puzzles[currentPuzzle];
 
@@ -70,6 +72,37 @@ const PuzzlePage = () => {
   }, [puzzle?.lineUci, puzzle?.lineIndex, puzzle?.initialPosition]);
 
   const hasTextHint = typeof puzzle?.hint === 'string' && puzzle.hint.trim().length > 0;
+
+  const getHintMove = () => {
+    if (!puzzle || !puzzle.lineUci) return null;
+    const tokens = puzzle.lineUci.split(/\s+/).filter(Boolean);
+    const index = typeof puzzle?.lineIndex === 'number' ? puzzle.lineIndex : 0;
+    const hintUci = tokens[index];
+    
+    if (!hintUci || !/^[a-h][1-8][a-h][1-8](?:[qrbn])?$/i.test(hintUci)) return null;
+    
+    try {
+      const engine = new Chess(puzzle.position);
+      const from = hintUci.slice(0, 2);
+      const to = hintUci.slice(2, 4);
+      const promotion = hintUci.length > 4 ? hintUci[4] : undefined;
+      const move = engine.move({ from, to, promotion });
+      if (!move) return null;
+      return `${move.san} (${hintUci})`;
+    } catch (_) {
+      return hintUci;
+    }
+  };
+
+  // Load streak data from localStorage on mount
+  useEffect(() => {
+    const streakKey = `pawnsposes:streak:${puzzleType}`;
+    const savedBestStreak = localStorage.getItem(streakKey);
+    if (savedBestStreak) {
+      setBestStreak(parseInt(savedBestStreak, 10));
+    }
+    setCurrentStreak(0); // Reset current streak on page load
+  }, [puzzleType]);
 
   // Access check on mount
   useEffect(() => {
@@ -427,8 +460,11 @@ const PuzzlePage = () => {
 
       // SHUFFLE PUZZLES RANDOMLY and load more to ensure good rating distribution
       // Load up to 100 puzzles to ensure we have puzzles in all difficulty ranges
+      // ✅ CRITICAL FIX: Shuffle first, then select - ensures balanced mix from all categories
       const maxPuzzles = Math.min(100, allPuzzles.length);
-      const shuffledPuzzles = allPuzzles.slice(0, maxPuzzles).sort(() => Math.random() - 0.5);
+      const shuffledPuzzles = allPuzzles
+        .sort(() => Math.random() - 0.5)  // Shuffle ALL puzzles first
+        .slice(0, maxPuzzles);             // Then take first 100
       console.log(`📦 Selected and shuffled ${shuffledPuzzles.length} puzzles from ${allPuzzles.length} available (randomly ordered)`);
 
       // Normalize and transform puzzle data for display
@@ -502,6 +538,17 @@ const PuzzlePage = () => {
           difficulty: p.difficulty
         };
       }).filter(Boolean);
+
+      // ✅ VERIFICATION: Show category distribution for weakness puzzles
+      if (puzzleType === 'fix-weaknesses' && normalized.length > 0) {
+        const categoryCount = {};
+        normalized.forEach(p => {
+          const theme = p.themes || '';
+          const mainTheme = Array.isArray(theme) ? theme[0] : theme.split(',')[0];
+          categoryCount[mainTheme] = (categoryCount[mainTheme] || 0) + 1;
+        });
+        console.log(`📊 Category distribution in selected puzzles:`, categoryCount);
+      }
 
       if (normalized.length === 0) {
         console.error('❌ No valid puzzles after normalization');
@@ -668,7 +715,7 @@ const PuzzlePage = () => {
    */
   const loadAllTacticsPuzzles = async (puzzleTypeCategory = 'fix-weaknesses') => {
     // Tactic categories for fix-weaknesses (excluding fork, mate-in-1, mate-in-2, mate-in-3)
-    const weaknessesTactics = ['pin', 'trapped-piece', 'hanging-piece', 'weak-king', 'back-rank-mate', 'discovered-attack', 'skewer', 'smothered-mate', 'x-ray'];
+    const weaknessesTactics = ['pin', 'trapped-piece', 'hanging-piece', 'weak-king', 'back-rank-mate', 'discovered-attack', 'skewer', 'x-ray'];
     let tacticCategories = weaknessesTactics;
     
     // For backward compatibility, if 'all' is requested
@@ -816,6 +863,7 @@ const PuzzlePage = () => {
     setFeedback('');
     setSolutionText('');
     setShowSolution(false);
+    setMoveResult(null); // Clear the persistent cross mark
     
     // Reset to the position AFTER the first auto-played move (not the original puzzle position)
     // This means resetting to when the user's turn begins
@@ -878,6 +926,7 @@ const PuzzlePage = () => {
         setPuzzles(prev => prev.map((pz2, i) => i === currentPuzzle ? { ...pz2, position: expectedFen, lineIndex: curIdx, completed: false } : pz2));
         setFeedback('');
         setShowSolution(false);
+        setMoveResult(null); // Clear the persistent cross mark
         return;
       }
 
@@ -1112,6 +1161,9 @@ const PuzzlePage = () => {
                 preserveDrawingsOnPositionChange={true}
                 moveResult={moveResult}
                 onMove={({ from, to, san, fen }) => {
+                  // Prevent moves if puzzle is already completed
+                  if (puzzle.completed) return;
+                  
                   const isUci = (s) => /^[a-h][1-8][a-h][1-8](?:[qrbn])?$/i.test(s || '');
                   const normalizeSan = (s) => (s || '').replace(/[+#?!]/g, '').replace(/=/g, '').trim().toLowerCase();
                   const playedSan = normalizeSan(san);
@@ -1134,7 +1186,6 @@ const PuzzlePage = () => {
                     if (expectedUci && expectedUci === playedUci.toLowerCase()) {
                       // Correct move - show green checkmark
                       setMoveResult({ square: to, isCorrect: true });
-                      setTimeout(() => setMoveResult(null), 800);
                       
                       try {
                         const engine = new Chess(puzzle.position);
@@ -1160,6 +1211,16 @@ const PuzzlePage = () => {
                               setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: finalFen, lineIndex: finalIdx, completed: isDone } : pz));
                               if (isDone) {
                                 setFeedback('🎉 Congratulations! You completed the puzzle.');
+                                // Increment streak on puzzle completion
+                                const newStreak = currentStreak + 1;
+                                setCurrentStreak(newStreak);
+                                if (newStreak > bestStreak) {
+                                  setBestStreak(newStreak);
+                                  localStorage.setItem(`pawnsposes:streak:${puzzleType}`, newStreak.toString());
+                                }
+                              } else {
+                                // Only clear checkmark if puzzle is not complete
+                                setTimeout(() => setMoveResult(null), 800);
                               }
                             } catch (_) {
                               // If auto-move fails, just keep the position after user move
@@ -1170,6 +1231,13 @@ const PuzzlePage = () => {
                           if (isDone) {
                             setFeedback('🎉 Congratulations! You completed the puzzle.');
                             setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, completed: true } : pz));
+                            // Increment streak on puzzle completion
+                            const newStreak = currentStreak + 1;
+                            setCurrentStreak(newStreak);
+                            if (newStreak > bestStreak) {
+                              setBestStreak(newStreak);
+                              localStorage.setItem(`pawnsposes:streak:${puzzleType}`, newStreak.toString());
+                            }
                           }
                         }
                       } catch (_) {
@@ -1178,10 +1246,11 @@ const PuzzlePage = () => {
                     } else {
                       // Incorrect move - show red X
                       setMoveResult({ square: to, isCorrect: false });
-                      setTimeout(() => setMoveResult(null), 800);
                       
                       setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: fen } : pz));
                       setFeedback(`Not quite. You played ${san}. Try again or show a hint.`);
+                      // Reset streak on incorrect move
+                      setCurrentStreak(0);
                     }
                   } else {
                     setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, position: fen, completed: false } : pz));
@@ -1189,18 +1258,25 @@ const PuzzlePage = () => {
                     const isSanCorrect = playedSan === targetSan && targetSan;
                     const isUciCorrect = playedUci === targetUci && targetUci;
                     if (isSanCorrect || isUciCorrect) {
-                      // Correct move - show green checkmark
+                      // Correct move - show green checkmark (persists after puzzle completion)
                       setMoveResult({ square: to, isCorrect: true });
-                      setTimeout(() => setMoveResult(null), 800);
                       
                       setFeedback(`Correct! ${san} is the solution.`);
                       setPuzzles(prev => prev.map((pz, i) => i === currentPuzzle ? { ...pz, completed: true } : pz));
+                      // Increment streak on puzzle completion
+                      const newStreak = currentStreak + 1;
+                      setCurrentStreak(newStreak);
+                      if (newStreak > bestStreak) {
+                        setBestStreak(newStreak);
+                        localStorage.setItem(`pawnsposes:streak:${puzzleType}`, newStreak.toString());
+                      }
                     } else {
                       // Incorrect move - show red X
                       setMoveResult({ square: to, isCorrect: false });
-                      setTimeout(() => setMoveResult(null), 800);
                       
                       setFeedback(`Not quite. You played ${san}. Try again or show a hint.`);
+                      // Reset streak on incorrect move
+                      setCurrentStreak(0);
                     }
                   }
                 }}
@@ -1221,6 +1297,18 @@ const PuzzlePage = () => {
                     className="bg-orange-500 h-2 rounded-full transition-all duration-300"
                     style={{ width: `${((currentPuzzle + 1) / puzzles.length) * 100}%` }}
                   />
+                </div>
+              </div>
+
+              {/* Streak Display */}
+              <div className="mb-3 flex gap-2">
+                <div className="flex-1 rounded border border-orange-200 bg-orange-50 px-3 py-2">
+                  <p className="text-xs font-medium text-orange-600">Streak 🔥</p>
+                  <p className="mt-1 text-lg font-bold text-orange-700">{currentStreak}</p>
+                </div>
+                <div className="flex-1 rounded border border-purple-200 bg-purple-50 px-3 py-2">
+                  <p className="text-xs font-medium text-purple-600">Best ⭐</p>
+                  <p className="mt-1 text-lg font-bold text-purple-700">{bestStreak}</p>
                 </div>
               </div>
 
@@ -1256,10 +1344,12 @@ const PuzzlePage = () => {
 
               {/* Feedback Message */}
               {feedback && (
-                <div className={`p-3 rounded-lg mb-4 text-sm font-medium ${
-                  feedback.includes('Correct') || feedback.includes('🎉')
-                    ? 'bg-green-50 text-green-800 border border-green-200'
-                    : 'bg-blue-50 text-blue-800 border border-blue-200'
+                <div className={`p-4 rounded-lg mb-4 font-medium ${
+                  feedback.includes('🎉')
+                    ? 'bg-gradient-to-r from-green-50 to-emerald-50 text-green-900 border-2 border-green-400 text-lg leading-relaxed shadow-md'
+                    : feedback.includes('Correct')
+                    ? 'bg-green-50 text-green-800 border border-green-200 text-base'
+                    : 'bg-blue-50 text-blue-800 border border-blue-200 text-sm'
                 }`}>
                   {feedback}
                 </div>
@@ -1304,6 +1394,17 @@ const PuzzlePage = () => {
 
                 <div className="flex flex-col sm:flex-row gap-3">
                   <button
+                    onClick={() => setShowHint(prev => !prev)}
+                    className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center text-white ${
+                      showHint
+                        ? 'bg-purple-600 hover:bg-purple-700'
+                        : 'bg-purple-500 hover:bg-purple-600'
+                    }`}
+                  >
+                    💡 {showHint ? 'Hide' : 'Hint'}
+                  </button>
+
+                  <button
                     onClick={handleShowSolution}
                     className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center text-white ${
                       showSolution
@@ -1314,34 +1415,16 @@ const PuzzlePage = () => {
                     <Eye size={16} className="mr-1" />
                     Show
                   </button>
-
-                  {(nextHintMove || hasTextHint) && (
-                    <button
-                      onClick={() => setShowHint(prev => !prev)}
-                      className={`flex-1 px-4 py-2.5 bg-purple-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center ${
-                        showHint
-                          ? 'bg-purple-600 hover:bg-purple-700'
-                          : 'hover:bg-purple-600'
-                      }`}
-                    >
-                      💡 {showHint ? 'Hide Hint' : 'Show Hint'}
-                    </button>
-                  )}
                 </div>
               </div>
 
               {/* Hint Display */}
-              {showHint && (nextHintMove || hasTextHint) && (
-                <div className="mb-4 p-4 bg-purple-50 border border-purple-300 rounded-lg animate-in fade-in-50 duration-200">
-                  <h4 className="text-sm font-semibold text-purple-900 mb-2">Hint:</h4>
-                  {nextHintMove ? (
-                    <p className="text-sm text-purple-800">
-                      Next move: <span className="font-semibold text-purple-900">{nextHintMove.san}</span>
-                      <span className="ml-2 text-xs text-purple-600">({nextHintMove.uci.toLowerCase()})</span>
-                    </p>
-                  ) : (
-                    <p className="text-sm text-purple-800">{puzzle.hint}</p>
-                  )}
+              {showHint && (
+                <div className="mb-4 p-4 bg-purple-50 border border-purple-300 rounded-lg">
+                  <h4 className="text-sm font-semibold text-purple-900 mb-2">Next Move:</h4>
+                  <p className="text-sm text-purple-800">
+                    <span className="font-bold text-lg text-purple-900">{getHintMove() || 'No move'}</span>
+                  </p>
                 </div>
               )}
 
