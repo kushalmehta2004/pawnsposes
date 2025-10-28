@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
 import { Loader2, ArrowLeft, Eye, EyeOff, RotateCcw, Undo2 } from 'lucide-react';
@@ -42,6 +42,34 @@ const PuzzlePage = () => {
   const [moveResult, setMoveResult] = useState(null); // { square, isCorrect }
 
   const puzzle = puzzles[currentPuzzle];
+
+  const nextHintMove = useMemo(() => {
+    if (!puzzle || !puzzle.lineUci) return null;
+    const tokens = puzzle.lineUci.split(/\s+/).filter(Boolean);
+    const index = typeof puzzle?.lineIndex === 'number' ? puzzle.lineIndex : 0;
+    const nextUci = tokens[index];
+    if (!nextUci) return null;
+
+    const from = nextUci.slice(0, 2);
+    const to = nextUci.slice(2, 4);
+    const promotion = nextUci.length > 4 ? nextUci[4] : undefined;
+
+    try {
+      const engine = new Chess(puzzle.initialPosition);
+      const move = engine.move({ from, to, promotion });
+      if (!move) return null;
+      return {
+        from,
+        to,
+        uci: nextUci,
+        san: move.san
+      };
+    } catch (_) {
+      return null;
+    }
+  }, [puzzle?.lineUci, puzzle?.lineIndex, puzzle?.initialPosition]);
+
+  const hasTextHint = typeof puzzle?.hint === 'string' && puzzle.hint.trim().length > 0;
 
   // Access check on mount
   useEffect(() => {
@@ -639,13 +667,13 @@ const PuzzlePage = () => {
    * 'learn-mistakes' uses dynamic generation from user games
    */
   const loadAllTacticsPuzzles = async (puzzleTypeCategory = 'fix-weaknesses') => {
-    // Tactic categories for fix-weaknesses
-    const weaknessesTactics = ['fork', 'pin', 'trapped-piece', 'hanging-piece', 'weak-king'];
+    // Tactic categories for fix-weaknesses (excluding fork, mate-in-1, mate-in-2, mate-in-3)
+    const weaknessesTactics = ['pin', 'trapped-piece', 'hanging-piece', 'weak-king', 'back-rank-mate', 'discovered-attack', 'skewer', 'smothered-mate', 'x-ray'];
     let tacticCategories = weaknessesTactics;
     
     // For backward compatibility, if 'all' is requested
     if (puzzleTypeCategory === 'all') {
-      const allTactics = ['back-rank-mate', 'discovered-attack', 'mate-in-1', 'mate-in-2', 'mate-in-3', 'skewer', 'smothered-mate', 'x-ray'];
+      const allTactics = ['back-rank-mate', 'discovered-attack', 'skewer', 'smothered-mate', 'x-ray'];
     
       tacticCategories = [...weaknessesTactics, ...allTactics];
     }
@@ -1196,15 +1224,27 @@ const PuzzlePage = () => {
                 </div>
               </div>
 
-      {/* Side to Move */}
-              {puzzle?.position && (() => {
-                const sideToMove = puzzle.position.split(' ')[1] === 'w' ? 'White' : 'Black';
-                        return (
-                  <p className="text-sm text-gray-600 mb-4">
-                    <span className="font-medium">Side to move:</span> {sideToMove}
-                  </p>
-                );
-              })()}
+              {/* Puzzle Highlights */}
+              {(puzzle?.position || puzzle?.rating) && (
+                <div className="mb-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {puzzle?.position && (() => {
+                    const sideToMove = puzzle.position.split(' ')[1] === 'w' ? 'White' : 'Black';
+                    return (
+                      <div className="rounded-xl border border-gray-200 bg-gray-50 px-5 py-4 shadow-sm">
+                        <p className="text-sm uppercase tracking-wide text-gray-500">Side to Move</p>
+                        <p className="mt-1 text-2xl font-bold text-gray-900">{sideToMove}</p>
+                      </div>
+                    );
+                  })()}
+
+                  {puzzle?.rating && (
+                    <div className="rounded-xl border border-gray-200 bg-gray-50 px-5 py-4 shadow-sm">
+                      <p className="text-sm uppercase tracking-wide text-gray-500">Puzzle Rating</p>
+                      <p className="mt-1 text-2xl font-bold text-gray-900">{puzzle.rating}</p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Objective Section */}
               <div className="mb-6">
@@ -1243,55 +1283,65 @@ const PuzzlePage = () => {
               </div>
 
               {/* Action Buttons */}
-              <div className="grid grid-cols-3 gap-3 mb-4">
-                <button
-                  onClick={handleShowSolution}
-                  className={`px-4 py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center text-white ${
-                    showSolution
-                      ? 'bg-amber-600 hover:bg-amber-700'
-                      : 'bg-orange-500 hover:bg-orange-600'
-                  }`}
-                >
-                  <Eye size={16} className="mr-1" />
-                  Show
-                </button>
-                
-                <button
-                  onClick={handleStepBack}
-                  className="px-4 py-2.5 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 transition-colors flex items-center justify-center"
-                >
-                  <Undo2 size={16} className="mr-1" />
-                  Step
-                </button>
+              <div className="mb-4 space-y-3">
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <button
+                    onClick={handleStepBack}
+                    className="flex-1 px-4 py-2.5 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 transition-colors flex items-center justify-center"
+                  >
+                    <Undo2 size={16} className="mr-1" />
+                    Step
+                  </button>
 
-                <button
-                  onClick={handleResetPuzzle}
-                  className="px-4 py-2.5 bg-green-500 text-white rounded-lg font-medium hover:bg-green-600 transition-colors flex items-center justify-center"
-                >
-                  <RotateCcw size={16} className="mr-1" />
-                  Reset
-                </button>
+                  <button
+                    onClick={handleResetPuzzle}
+                    className="flex-1 px-4 py-2.5 bg-green-500 text-white rounded-lg font-medium hover:bg-green-600 transition-colors flex items-center justify-center"
+                  >
+                    <RotateCcw size={16} className="mr-1" />
+                    Reset
+                  </button>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <button
+                    onClick={handleShowSolution}
+                    className={`flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center text-white ${
+                      showSolution
+                        ? 'bg-amber-600 hover:bg-amber-700'
+                        : 'bg-orange-500 hover:bg-orange-600'
+                    }`}
+                  >
+                    <Eye size={16} className="mr-1" />
+                    Show
+                  </button>
+
+                  {(nextHintMove || hasTextHint) && (
+                    <button
+                      onClick={() => setShowHint(prev => !prev)}
+                      className={`flex-1 px-4 py-2.5 bg-purple-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center ${
+                        showHint
+                          ? 'bg-purple-600 hover:bg-purple-700'
+                          : 'hover:bg-purple-600'
+                      }`}
+                    >
+                      💡 {showHint ? 'Hide Hint' : 'Show Hint'}
+                    </button>
+                  )}
+                </div>
               </div>
 
-              {/* Hint Button */}
-              {puzzle?.hint && (
-                <button
-                  onClick={() => setShowHint(!showHint)}
-                  className={`w-full mb-4 px-4 py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center text-white ${
-                    showHint
-                      ? 'bg-purple-600 hover:bg-purple-700'
-                      : 'bg-purple-500 hover:bg-purple-600'
-                  }`}
-                >
-                  💡 {showHint ? 'Hide Hint' : 'Show Hint'}
-                </button>
-              )}
-
               {/* Hint Display */}
-              {showHint && puzzle?.hint && (
+              {showHint && (nextHintMove || hasTextHint) && (
                 <div className="mb-4 p-4 bg-purple-50 border border-purple-300 rounded-lg animate-in fade-in-50 duration-200">
                   <h4 className="text-sm font-semibold text-purple-900 mb-2">Hint:</h4>
-                  <p className="text-sm text-purple-800">{puzzle.hint}</p>
+                  {nextHintMove ? (
+                    <p className="text-sm text-purple-800">
+                      Next move: <span className="font-semibold text-purple-900">{nextHintMove.san}</span>
+                      <span className="ml-2 text-xs text-purple-600">({nextHintMove.uci.toLowerCase()})</span>
+                    </p>
+                  ) : (
+                    <p className="text-sm text-purple-800">{puzzle.hint}</p>
+                  )}
                 </div>
               )}
 
@@ -1305,17 +1355,7 @@ const PuzzlePage = () => {
                 </div>
               )}
 
-              {/* Puzzle Info - Rating & Popularity */}
-              <div className="mt-6 pt-6 border-t border-gray-200 mb-6">
-                <div className="space-y-2">
-                  {puzzle?.rating && (
-                    <p className="text-xs text-gray-600">
-                      <span className="font-medium">Rating:</span> {puzzle.rating}
-                    </p>
-                  )}
-                  
-                </div>
-              </div>
+              
 
               {/* Themes - Display as Badges */}
               {puzzle?.themes && (Array.isArray(puzzle.themes) ? puzzle.themes.length > 0 : puzzle.themes.trim() !== '') && (
