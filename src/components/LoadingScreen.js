@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 
-const LoadingScreen = ({ progressPercent = 0, currentStep = 0 }) => {
+const LoadingScreen = ({ progressPercent = 0, currentStep = 0, elapsedTime = 0 }) => {
   const [animatedStep, setAnimatedStep] = useState(currentStep);
+  const [displayElapsedTime, setDisplayElapsedTime] = useState(0);
+  
   const steps = [
     'Fetching & filtering game data...',
     'Analyzing mistakes & patterns...',
@@ -10,6 +12,25 @@ const LoadingScreen = ({ progressPercent = 0, currentStep = 0 }) => {
     'Generating AI explanations...',
     'Finalizing your comprehensive report!'
   ];
+
+  // Step timing estimates (in seconds) - approximate duration for each step
+  const stepDurations = [18, 18, 18, 18, 18]; // Total ~90 seconds (1 min 30 sec)
+  
+  // Calculate ETA based on current step and progress
+  const calculateETA = () => {
+    let totalTimeForPreviousSteps = stepDurations.slice(0, currentStep).reduce((a, b) => a + b, 0);
+    let totalEstimatedTime = stepDurations.reduce((a, b) => a + b, 0);
+    let remainingTime = totalEstimatedTime - displayElapsedTime;
+    
+    return Math.max(0, Math.ceil(remainingTime));
+  };
+
+  // Format seconds to MM:SS
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   // Add a slight delay when transitioning between steps for smoother animation
   useEffect(() => {
@@ -19,6 +40,11 @@ const LoadingScreen = ({ progressPercent = 0, currentStep = 0 }) => {
     
     return () => clearTimeout(timer);
   }, [currentStep, animatedStep]);
+
+  // Track elapsed time and update display
+  useEffect(() => {
+    setDisplayElapsedTime(elapsedTime);
+  }, [elapsedTime]);
 
   return (
     <div className="loading-screen-container">
@@ -269,6 +295,47 @@ const LoadingScreen = ({ progressPercent = 0, currentStep = 0 }) => {
           border-color: #C7C7CC;
           transform: scale(1.05);
         }
+
+        /* Timer and ETA section */
+        .timer-section {
+          display: flex;
+          justify-content: space-around;
+          align-items: center;
+          margin-top: 24px;
+          padding-top: 16px;
+          border-top: 1px solid #E5E5EA;
+          gap: 16px;
+        }
+
+        .timer-item {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 4px;
+        }
+
+        .timer-label {
+          font-size: 12px;
+          color: #8a8a8a;
+          font-weight: 500;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+
+        .timer-value {
+          font-size: 18px;
+          font-weight: 700;
+          color: #333;
+          font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+          letter-spacing: 1px;
+        }
+
+        .timer-icon {
+          color: #FF9500;
+          display: inline-flex;
+          margin-right: 4px;
+          vertical-align: middle;
+        }
       `}</style>
 
       <motion.div
@@ -308,6 +375,19 @@ const LoadingScreen = ({ progressPercent = 0, currentStep = 0 }) => {
             );
           })}
         </ul>
+
+        {/* ETA Display */}
+        <motion.div
+          className="timer-section"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5, duration: 0.6 }}
+        >
+          <div className="timer-item">
+            <span className="timer-label">⏳ Time Remaining</span>
+            <span className="timer-value">{formatTime(calculateETA())}</span>
+          </div>
+        </motion.div>
       </motion.div>
     </div>
   );

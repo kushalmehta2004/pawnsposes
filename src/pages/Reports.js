@@ -153,6 +153,7 @@ const Reports = () => {
   const [userValidationStatus, setUserValidationStatus] = useState(null); // null, 'valid', 'invalid'
   const [currentStep, setCurrentStep] = useState(0);
   const [stockfishProgress, setStockfishProgress] = useState('');
+  const [elapsedTime, setElapsedTime] = useState(0);
 
   // 🗑️ Clear all IndexedDB data on page load/refresh for fresh analysis
   useEffect(() => {
@@ -169,6 +170,20 @@ const Reports = () => {
 
     clearDataOnLoad();
   }, []); // Empty dependency array = run once on mount
+
+  // ⏱️ Track elapsed time while loading
+  useEffect(() => {
+    if (!isLoading) {
+      setElapsedTime(0);
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      setElapsedTime(prev => prev + 1);
+    }, 1000); // Update every second
+
+    return () => clearInterval(intervalId);
+  }, [isLoading]);
 
   const platforms = [
     { value: 'lichess', label: 'Lichess.org', icon: '♞' },
@@ -2281,7 +2296,7 @@ Keep examples concise and actionable.`;
 
   // If loading, show the full-screen loading component
   if (progressStage) {
-    return <LoadingScreen progressPercent={progressPercent} currentStep={currentStep} stockfishProgress={stockfishProgress} />;
+    return <LoadingScreen progressPercent={progressPercent} currentStep={currentStep} stockfishProgress={stockfishProgress} elapsedTime={elapsedTime} />;
   }
 
   return (
