@@ -117,9 +117,18 @@ const Footer = () => {
         {/* Bottom Bar */}
         <div className="border-t border-gray-700 py-6">
           <div className="flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
-            <p className="text-gray-400 text-sm">
-              © 2024 PawnsPoses Chess Coaching. All rights reserved.
-            </p>
+            <div className="space-y-2">
+              <p className="text-gray-400 text-sm">
+                © 2024 PawnsPoses Chess Coaching. All rights reserved.
+              </p>
+              <p className="text-gray-500 text-xs">
+                Some puzzles are generated using open data from 
+                <a href="https://lichess.org" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-white transition-colors ml-1">
+                  lichess.org
+                </a>
+                <span className="ml-1">(CC BY SA 3.0)</span>
+              </p>
+            </div>
             <div className="flex space-x-6 text-sm text-gray-400">
               <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
               <a href="#" className="hover:text-white transition-colors">Terms of Service</a>
