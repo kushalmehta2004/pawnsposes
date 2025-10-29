@@ -1,15 +1,15 @@
 /**
  * PDF Service
  * Handles PDF generation from HTML content and storage in Supabase
- * Uses html2pdf for better HTML preservation and multi-page support
+ * Uses html2pdf with optimized settings for multi-page support and link preservation
  */
 
 import html2pdf from 'html2pdf.js';
 import { supabase } from './supabaseClient';
 
 /**
- * Generates a PDF from the current page content using html2pdf
- * This preserves HTML structure, makes text selectable, and handles page breaks naturally
+ * Generates a PDF from the current page content
+ * Preserves HTML structure, creates clickable links, and handles multi-page layouts
  * @param {string} reportTitle - Title for the PDF file
  * @returns {Promise<Blob>} - PDF blob
  */
@@ -33,106 +33,216 @@ export const generatePDFFromCurrentPage = async (reportTitle = 'Chess Analysis R
     // Create a clone of the element to manipulate without affecting the original
     const clonedElement = element.cloneNode(true);
 
-    // Convert PDF-safe buttons to links (for buttons with pdf-link class)
-    const pdfLinkButtons = clonedElement.querySelectorAll('button.pdf-link');
-    pdfLinkButtons.forEach(btn => {
-      const href = btn.getAttribute('data-href');
-      if (href) {
-        const link = document.createElement('a');
-        link.href = href;
-        link.textContent = btn.textContent;
-        link.style.color = '#3b82f6';
-        link.style.textDecoration = 'underline';
-        link.style.cursor = 'pointer';
+    // ✅ STEP 1: Convert buttons to visibly styled links (preserved in PDF)
+    const buttons = clonedElement.querySelectorAll('button');
+    buttons.forEach(btn => {
+      const dataHref = btn.getAttribute('data-href');
+      const href = dataHref || btn.href || '#';
+      const text = btn.textContent || btn.innerText;
+      
+      // Create styled link that looks like a button
+      const link = document.createElement('a');
+      link.href = href;
+      link.textContent = text;
+      link.style.cssText = `
+        display: inline-block;
+        padding: 8px 14px;
+        margin: 4px 2px;
+        background-color: #3b82f6;
+        color: white;
+        text-decoration: none;
+        border-radius: 4px;
+        font-weight: 500;
+        border: 1px solid #2563eb;
+      `;
+      
+      if (href && href !== '#') {
         link.setAttribute('target', '_blank');
         link.setAttribute('rel', 'noopener,noreferrer');
-        btn.replaceWith(link);
       }
+      
+      btn.replaceWith(link);
     });
 
-    // Hide buttons and interactive elements in the clone
-    const elementsToHide = clonedElement.querySelectorAll('button, .no-print, [data-no-print], nav, header, footer, .print-button-container, .back-link');
+    // ✅ STEP 2: Hide UI elements that shouldn't appear in PDF
+    const elementsToHide = clonedElement.querySelectorAll(
+      '.no-print, [data-no-print], nav, header, footer, .print-button-container, .back-link, [class*="download"], [class*="Download"]'
+    );
     elementsToHide.forEach(el => {
       el.style.display = 'none';
     });
 
-    // Add styles to ensure proper PDF formatting
+    // ✅ STEP 3: Apply print-optimized CSS with proper pagination
     const styleEl = document.createElement('style');
     styleEl.textContent = `
-      @media print {
-        body { background: white !important; }
-        * { 
-          box-shadow: none !important; 
-          border-radius: 0 !important;
-        }
-        button, .no-print, [data-no-print] { 
-          display: none !important; 
-        }
+      /* Reset spacing */
+      * {
+        box-shadow: none !important;
       }
       
+      body {
+        background: white !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      
+      main, .page, [id*="report"] {
+        padding-top: 0 !important;
+        min-height: auto !important;
+        margin: 0 !important;
+        background: white !important;
+      }
+      
+      /* Section & Article - Allow natural breaking to prevent large white gaps */
+      section, article {
+        margin-bottom: 8px !important;
+        padding: 12px !important;
+        background: white !important;
+        /* Remove page-break-inside: avoid to allow natural pagination */
+      }
+      
+      /* Heading optimization - Allow breaks after headings for natural flow */
+      h1, h2, h3, h4, h5, h6 {
+        margin-bottom: 6px !important;
+        margin-top: 8px !important;
+        /* Remove page-break-after: avoid for natural pagination */
+      }
+      
+      h1 { font-size: 22px !important; }
+      h2 { font-size: 16px !important; }
+      h3 { font-size: 14px !important; }
+      
+      /* Table optimization - Keep tables intact */
+      table {
+        page-break-inside: avoid;
+        width: 100% !important;
+        border-collapse: collapse !important;
+        margin: 4px 0 !important;
+      }
+      
+      th, td {
+        padding: 4px 6px !important;
+        border: 0.5px solid #d1d5db !important;
+        font-size: 11px !important;
+      }
+      
+      th {
+        background-color: #f3f4f6 !important;
+        font-weight: 600 !important;
+      }
+      
+      /* Paragraph optimization - Prevent orphans/widows (single lines isolated from their block) */
+      p {
+        margin-bottom: 4px !important;
+        orphans: 3;
+        widows: 3;
+      }
+      
+      /* List optimization - Allow natural breaking for long lists */
+      ul, ol {
+        margin-left: 16px !important;
+        margin-bottom: 4px !important;
+      }
+      
+      li {
+        margin-bottom: 2px !important;
+        orphans: 2;
+        widows: 2;
+      }
+      
+      /* List item paragraphs - Prevent splitting */
+      li > p {
+        orphans: 2;
+        widows: 2;
+        margin-bottom: 2px !important;
+      }
+      
+      /* Links styling */
+      a {
+        color: inherit !important;
+        text-decoration: none !important;
+      }
+      
+      /* Card optimization - Allow natural breaking instead of forcing to next page */
+      .card, [class*="card"] {
+        margin: 6px 0 !important;
+        padding: 10px !important;
+        border: 1px solid #e5e7eb !important;
+        /* Remove page-break-inside: avoid for natural flow */
+      }
+      
+      /* Image optimization - Keep images intact */
+      img {
+        max-width: 100% !important;
+        height: auto !important;
+        page-break-inside: avoid;
+      }
+      
+      /* Prevent empty pages */
       .page-break {
         page-break-after: always;
       }
       
-      section {
-        page-break-inside: avoid;
-      }
-      
-      h1, h2, h3 {
-        page-break-after: avoid;
-      }
-      
-      table {
-        page-break-inside: avoid;
+      /* Explicit page break helpers (optional, for use if needed) */
+      .force-page-break {
+        page-break-before: always;
       }
     `;
     clonedElement.appendChild(styleEl);
 
-    // html2pdf options for better formatting
+    // ✅ STEP 4: Configure html2pdf with natural pagination settings
     const options = {
-      margin: [10, 10, 10, 10], // margins in mm: top, left, bottom, right
+      margin: [8, 8, 8, 8], // 8mm margins (tighter than before)
       filename: `${reportTitle.replace(/[^a-z0-9]/gi, '-')}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { 
-        scale: 2,
+      image: { type: 'jpeg', quality: 0.95 },
+      html2canvas: {
+        scale: 2, // Higher resolution for better text clarity
         useCORS: true,
         allowTaint: true,
-        backgroundColor: '#ffffff'
+        backgroundColor: '#ffffff',
+        windowHeight: clonedElement.scrollHeight, // Ensure full page height is captured
+        logging: false
       },
-      jsPDF: { 
-        orientation: 'portrait', 
-        unit: 'mm', 
+      jsPDF: {
+        orientation: 'portrait',
+        unit: 'mm',
         format: 'a4',
         compress: true
       },
-      pagebreak: { 
-        mode: ['avoid-all', 'css', 'legacy'] // Better page break handling
+      pagebreak: {
+        mode: ['css', 'legacy'], // Use CSS page breaks primarily
+        // Only avoid breaking in truly unbreakable elements (tables, images)
+        // Allow natural pagination for sections, headers, and content
+        avoid: ['table', 'img']
       }
     };
 
-    // Generate PDF and return as blob
     console.log('📝 Generating PDF with html2pdf...');
-    
+
     return new Promise((resolve, reject) => {
-      html2pdf()
-        .set(options)
-        .from(clonedElement)
-        .toPdf()
-        .get('pdf')
-        .then((pdf) => {
-          const blob = pdf.output('blob');
-          if (blob && blob.size > 0) {
-            console.log('✅ PDF generated successfully, size:', blob.size);
-            resolve(blob);
-          } else {
-            console.error('❌ PDF generation failed - empty blob');
-            reject(new Error('PDF generation produced an empty file'));
-          }
-        })
-        .catch((error) => {
-          console.error('❌ html2pdf error:', error);
-          reject(new Error(`html2pdf failed: ${error.message}`));
-        });
+      try {
+        html2pdf()
+          .set(options)
+          .from(clonedElement)
+          .toPdf()
+          .get('pdf')
+          .then((pdf) => {
+            const blob = pdf.output('blob');
+            if (blob && blob.size > 0) {
+              console.log('✅ PDF generated successfully, size:', (blob.size / 1024).toFixed(2), 'KB');
+              resolve(blob);
+            } else {
+              throw new Error('PDF generation produced an empty file');
+            }
+          })
+          .catch((error) => {
+            console.error('❌ html2pdf error:', error);
+            reject(new Error(`html2pdf failed: ${error.message}`));
+          });
+      } catch (error) {
+        console.error('❌ Error in PDF generation promise:', error);
+        reject(error);
+      }
     });
 
   } catch (error) {

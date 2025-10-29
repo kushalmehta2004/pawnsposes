@@ -501,52 +501,34 @@ Return ONLY a JSON object with exactly this format (no markdown, no extra text):
   };
 
 
-  const handleDownloadPDF = () => {
-    // Force light mode and hide interactive buttons in the printed PDF
-    const wasDark = document.body.classList.contains('dark-mode');
-
-    // Temporary print-only stylesheet to hide buttons (e.g., dark mode toggle)
-    const styleEl = document.createElement('style');
-    styleEl.setAttribute('data-temp-print-style', 'true');
-    styleEl.textContent = `
-      @media print {
-        button { display: none !important; }
-      }
-    `;
-    document.head.appendChild(styleEl);
-
-    const beforePrintHandler = () => {
-      if (wasDark) document.body.classList.remove('dark-mode');
-    };
-
-    const cleanup = () => {
-      // Remove temp style
-      if (styleEl && styleEl.parentNode) styleEl.parentNode.removeChild(styleEl);
-      // Restore dark mode if it was active
-      if (wasDark && !document.body.classList.contains('dark-mode')) {
-        document.body.classList.add('dark-mode');
-      }
-      window.removeEventListener('afterprint', afterPrintHandler);
-      window.removeEventListener('beforeprint', beforePrintHandler);
-    };
-
-    const afterPrintHandler = () => {
-      cleanup();
-    };
-
-    window.addEventListener('beforeprint', beforePrintHandler);
-    window.addEventListener('afterprint', afterPrintHandler);
-
-    // Ensure light mode right before opening the print dialog
-    beforePrintHandler();
-    window.print();
-
-    // Fallback in case 'afterprint' doesn't fire (some browsers)
-    setTimeout(() => {
-      if (document.head.contains(styleEl)) {
-        cleanup();
-      }
-    }, 1500);
+  const handleDownloadPDF = async () => {
+    try {
+      console.log('📥 Generating PDF for download...');
+      const username = analysis?.username || analysis?.formData?.username || 'Unknown';
+      const gameCount = analysis?.games?.length || analysis?.gameData?.length || 0;
+      const title = `${username}'s Chess Analysis Report - ${gameCount} games`;
+      
+      // Use the same PDF generation as auto-save for consistency
+      const pdfBlob = await pdfService.generatePDFFromCurrentPage(title);
+      
+      // Create download link
+      const url = URL.createObjectURL(pdfBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${title.replace(/[^a-z0-9]/gi, '-')}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      
+      // Cleanup
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      console.log('✅ PDF downloaded successfully');
+      toast.success('PDF downloaded successfully!');
+    } catch (error) {
+      console.error('❌ Error downloading PDF:', error);
+      toast.error('Failed to generate PDF. Please try again.');
+    }
   };
 
 
