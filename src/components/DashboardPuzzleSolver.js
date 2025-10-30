@@ -492,6 +492,7 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
                   enableArrows
                   preserveDrawingsOnPositionChange={true}
                   moveResult={moveResult}
+                  highlightedSquares={showHint && nextHintMove?.uci ? [nextHintMove.uci.slice(0, 2)] : []}
                   onMove={handleMove}
                   disabled={puzzle?.completed}
                 />
@@ -579,11 +580,14 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
 
                 {/* Hint Display */}
                 {showHint && canShowHint && (
-                  <div className="p-3 bg-purple-50 dark:bg-purple-900/30 border border-purple-300 dark:border-purple-700 rounded-lg mt-2">
-                    <h4 className="text-xs font-semibold text-purple-900 dark:text-purple-200 mb-1">Next Move Hint:</h4>
+                  <div className="p-3 bg-purple-50 dark:bg-purple-900/30 border-2 border-purple-400 dark:border-purple-600 rounded-lg mt-2 shadow-md">
+                    <h4 className="text-xs font-semibold text-purple-900 dark:text-purple-200 mb-2 flex items-center">
+                      <span className="mr-1">💡</span>
+                      Next Move Hint:
+                    </h4>
                     {nextHintMove ? (
                       <>
-                        <p className="text-xs text-purple-800 dark:text-purple-300 font-mono">
+                        <p className="text-xs text-purple-800 dark:text-purple-300 font-mono font-bold">
                           {nextHintMove.san || nextHintMove.uci}
                         </p>
                         {nextHintMove.san && (
@@ -594,6 +598,7 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
                         <p className="text-[10px] text-purple-600 dark:text-purple-400 mt-1">
                           UCI: {nextHintMove.uci}
                         </p>
+                        
                       </>
                     ) : hasTextHint ? (
                       <p className="text-xs text-purple-800 dark:text-purple-300">

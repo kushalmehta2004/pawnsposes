@@ -57,7 +57,8 @@ const PuzzlePage = () => {
     const promotion = nextUci.length > 4 ? nextUci[4] : undefined;
 
     try {
-      const engine = new Chess(puzzle.initialPosition);
+      // Use current position (after auto-play), fallback to initial position
+      const engine = new Chess(puzzle.position || puzzle.initialPosition);
       const move = engine.move({ from, to, promotion });
       if (!move) return null;
       return {
@@ -69,7 +70,7 @@ const PuzzlePage = () => {
     } catch (_) {
       return null;
     }
-  }, [puzzle?.lineUci, puzzle?.lineIndex, puzzle?.initialPosition]);
+  }, [puzzle?.lineUci, puzzle?.lineIndex, puzzle?.position, puzzle?.initialPosition]);
 
   const hasTextHint = typeof puzzle?.hint === 'string' && puzzle.hint.trim().length > 0;
 
@@ -1160,6 +1161,7 @@ const PuzzlePage = () => {
                 enableArrows
                 preserveDrawingsOnPositionChange={true}
                 moveResult={moveResult}
+                highlightedSquares={showHint && nextHintMove?.from ? [nextHintMove.from] : []}
                 onMove={({ from, to, san, fen }) => {
                   // Prevent moves if puzzle is already completed
                   if (puzzle.completed) return;
@@ -1420,11 +1422,19 @@ const PuzzlePage = () => {
 
               {/* Hint Display */}
               {showHint && (
-                <div className="mb-4 p-4 bg-purple-50 border border-purple-300 rounded-lg">
-                  <h4 className="text-sm font-semibold text-purple-900 mb-2">Next Move:</h4>
-                  <p className="text-sm text-purple-800">
+                <div className="mb-4 p-4 bg-purple-50 border-2 border-purple-400 rounded-lg shadow-md">
+                  <h4 className="text-sm font-semibold text-purple-900 mb-3 flex items-center">
+                    <span className="mr-2">💡</span>
+                    Next Move Hint:
+                  </h4>
+                  <p className="text-sm text-purple-800 mb-2">
                     <span className="font-bold text-lg text-purple-900">{getHintMove() || 'No move'}</span>
                   </p>
+                  {nextHintMove?.from && (
+                    <p className="text-xs text-purple-700 mt-2 bg-purple-100 px-2 py-1 rounded">
+                      🎯 The highlighted square shows which piece to move!
+                    </p>
+                  )}
                 </div>
               )}
 
