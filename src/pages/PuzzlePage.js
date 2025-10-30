@@ -1430,11 +1430,7 @@ const PuzzlePage = () => {
                   <p className="text-sm text-purple-800 mb-2">
                     <span className="font-bold text-lg text-purple-900">{getHintMove() || 'No move'}</span>
                   </p>
-                  {nextHintMove?.from && (
-                    <p className="text-xs text-purple-700 mt-2 bg-purple-100 px-2 py-1 rounded">
-                      🎯 The highlighted square shows which piece to move!
-                    </p>
-                  )}
+                  
                 </div>
               )}
 
