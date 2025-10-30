@@ -1518,6 +1518,7 @@ export const generateReportFromGeminiFullGames = async (playerInfo, gameContext,
 `- Provide EXACTLY 3 recurringWeaknesses. Titles must be conceptual and descriptive (e.g., outposts/weak squares, pawn breaks & pawn tension, trading good vs. bad pieces, exchange sacrifices, counter-attacking instincts, static vs. dynamic evaluation, space advantage handling, minority attacks, isolated queen pawn play, passed pawn conversion, evaluating critical positions, improving worst-placed piece, candidate-move generation & 3-4 move visualization).\n` +
 `- Each weakness needs a detailed explanation of WHY it recurs, highlighting strategic/psychological habits rather than tactical blunders.\n` +
 `- For every weakness, include 1 example. All examples must be strategic (no simple piece blunders) and reference the user's move at moveNumber >= 16.\n` +
+`- STRICT: Only include examples where moveNumber is an odd integer (1, 3, 5, ...). If a potential example uses an even moveNumber, discard it and choose another valid user move.\n` +
 `- CRITICAL: Use ONLY moves played by ${safeName}. Look at movesWithFen array and filter by playerColor to identify which moves belong to ${safeName}. NEVER use opponent moves.\n` +
 `- CRITICAL: Always use fenBefore for the FEN field. The position must show the board BEFORE the user made their move, so they can see where they should have played the better move. Never use fenAfter.\n` +
 `- CRITICAL: The "played" field must contain the EXACT SAN move that ${safeName} actually played (from movesWithFen where color matches playerColor). Verify this is the user's move, not the opponent's.\n` +
@@ -1611,72 +1612,107 @@ Begin your analysis now.` + JSON.stringify(compactGames);
   const groundExamples = (w, usedGames = new Set()) => {
     console.log(`\n=== Grounding examples for weakness: "${w.title}" ===`);
     console.log(`Used games so far:`, Array.from(usedGames));
-    
+
     const raw = Array.isArray(w.examples) ? w.examples : [];
     console.log(`Raw examples from Gemini:`, raw.map(ex => `Game ${ex.gameNumber}, Move ${ex.moveNumber}`));
-    
+
     const filtered = raw.filter(ex => Number(ex?.moveNumber) >= 16);
     const src = filtered.length ? filtered : raw;
     const out = [];
+
+    const isMoveAcceptable = (matchingMistake, userMoveSan, geminiPlayedSan) => {
+      if (!matchingMistake) {
+        console.log(`  -> Skipped: No matching Stockfish entry`);
+        return false;
+      }
+
+      const drop = Number(matchingMistake.scoreDrop) || 0;
+      if (drop < 80) {
+        console.log(`  -> Skipped: score drop ${drop} < threshold (80)`);
+        return false;
+      }
+
+      if (geminiPlayedSan && geminiPlayedSan !== userMoveSan) {
+        console.log(`  -> Skipped: Gemini move mismatch (${geminiPlayedSan} vs ${userMoveSan})`);
+        return false;
+      }
+
+      if (matchingMistake.bestMove && matchingMistake.bestMove.trim().toLowerCase() === (matchingMistake.move || '').trim().toLowerCase()) {
+        console.log(`  -> Skipped: Stockfish best move equals played move`);
+        return false;
+      }
+
+      return true;
+    };
 
     // First pass: prioritize examples from unused games with valid user moves
     console.log(`\n--- First pass: Looking for unused games with valid user moves ---`);
     for (const ex of src) {
       const gnum = Number(ex?.gameNumber);
       const mv = Number(ex?.moveNumber);
-      
+
       console.log(`Checking example: Game ${gnum}, Move ${mv}`);
-      
+
       if (!gnum || !mv) {
         console.log(`  -> Skipped: Invalid game number or move number`);
         continue;
       }
-      
+
+      if (mv % 2 === 0) {
+        console.log(`  -> Skipped: Move number ${mv} is even (require odd move numbers)`);
+        continue;
+      }
+
       if (usedGames.has(gnum)) {
         console.log(`  -> Skipped: Game ${gnum} already used`);
         continue;
       }
-      
+
       const userMove = getUserMoveAt(gnum, mv);
-      if (userMove) {
-        console.log(`  -> ✓ Valid user move found: ${userMove.san}`);
-        
-        // Find the corresponding mistake to get Stockfish's best move
-        const mistakes = mistakesByGameNumber.get(gnum) || [];
-        const matchingMistake = mistakes.find(m => Number(m.moveNumber) === mv);
-        
-        // CRITICAL: Always use Stockfish's best move, never Gemini's suggestion
-        const stockfishBestMove = matchingMistake?.bestMove || '';
-        
-        // Validate that the best move is not empty
-        if (!stockfishBestMove) {
-          console.log(`  -> Warning: No Stockfish best move found for Game ${gnum}, Move ${mv}`);
-        } else {
-          console.log(`  -> ✓ Stockfish best move: ${stockfishBestMove}`);
-        }
-        
-        // Validate that the played move matches what Gemini suggested (for accuracy check)
-        if (ex.played && ex.played !== userMove.san) {
-          console.log(`  -> ⚠️ Gemini suggested wrong move: "${ex.played}" vs actual: "${userMove.san}"`);
-        }
-        
-        out.push({
-          gameNumber: gnum,
-          moveNumber: mv,
-          played: userMove.san, // enforce real played SAN (user's actual move)
-          fen: userMove.fenBefore, // CRITICAL: Use fenBefore to show position before the move
-          justification: ex.justification || '',
-          betterPlan: ex.betterPlan || '',
-          betterMove: stockfishBestMove, // CRITICAL: Use ONLY Stockfish's top recommendation
-          playerColor: gameIndex.get(gnum)?.playerColor || 'unknown',
-          centipawnLoss: matchingMistake?.scoreDrop || 0
-        });
-        usedGames.add(gnum); // Mark this game as used
-        console.log(`  -> Game ${gnum} marked as used. Used games now:`, Array.from(usedGames));
-        if (out.length >= 3) break; // Limit to 3 examples per weakness
-      } else {
+      if (!userMove) {
         console.log(`  -> Skipped: No valid user move found at Game ${gnum}, Move ${mv}`);
+        continue;
       }
+
+      const userMoveSan = userMove.san;
+      console.log(`  -> ✓ Valid user move found: ${userMoveSan}`);
+
+      const mistakes = mistakesByGameNumber.get(gnum) || [];
+      const matchingMistake = mistakes.find(m => Number(m.moveNumber) === mv);
+
+      if (!isMoveAcceptable(matchingMistake, userMoveSan, ex.played)) {
+        continue;
+      }
+
+      const stockfishBestMove = matchingMistake?.bestMove || '';
+      if (!stockfishBestMove) {
+        console.log(`  -> Warning: No Stockfish best move found for Game ${gnum}, Move ${mv}`);
+        continue;
+      }
+      console.log(`  -> ✓ Stockfish best move: ${stockfishBestMove}`);
+
+      if (!ex.justification || ex.justification.trim().length < 20) {
+        ex.justification = generateJustificationFromMistake(matchingMistake, userMoveSan, stockfishBestMove, w.title);
+      }
+
+      if (!ex.betterPlan || ex.betterPlan.trim().length < 15) {
+        ex.betterPlan = generateBetterPlanFromMistake(matchingMistake, stockfishBestMove, w.title);
+      }
+
+      out.push({
+        gameNumber: gnum,
+        moveNumber: mv,
+        played: userMoveSan,
+        fen: userMove.fenBefore,
+        justification: ex.justification,
+        betterPlan: ex.betterPlan,
+        betterMove: stockfishBestMove,
+        playerColor: gameIndex.get(gnum)?.playerColor || 'unknown',
+        centipawnLoss: matchingMistake?.scoreDrop || 0
+      });
+      usedGames.add(gnum);
+      console.log(`  -> Game ${gnum} marked as used. Used games now:`, Array.from(usedGames));
+      if (out.length >= 3) break;
     }
 
     // Second pass: if we need more examples, use mistakes from unused games
@@ -1687,40 +1723,44 @@ Begin your analysis now.` + JSON.stringify(compactGames);
           console.log(`  -> Skipped Game ${gnum}: already used`);
           continue;
         }
-        
-        const m = mistakes.find(mm => Number(mm.moveNumber) >= 16);
-        if (m) {
-          console.log(`  -> ✓ Found mistake in Game ${gnum}, Move ${m.moveNumber}: ${m.move || m.playerMove}`);
-          
-          // Get the user's actual move from the game index
-          const userMove = getUserMoveAt(gnum, m.moveNumber);
-          const playedMove = userMove?.san || m.move || m.playerMove;
-          const fenToUse = userMove?.fenBefore || m.previousFen || m.fen;
-          
-          // CRITICAL: Use Stockfish's best move from the mistake data
-          const stockfishBestMove = m.bestMove || '';
-          
-          if (!stockfishBestMove) {
-            console.log(`  -> Warning: No Stockfish best move in mistake data for Game ${gnum}, Move ${m.moveNumber}`);
-          } else {
-            console.log(`  -> ✓ Stockfish best move: ${stockfishBestMove}`);
-          }
-          
-          out.push({
-            gameNumber: gnum,
-            moveNumber: m.moveNumber,
-            played: playedMove, // User's actual move in SAN
-            fen: fenToUse, // Position BEFORE the user's move
-            justification: w.description ? w.description.slice(0, 120) : 'From user mistake record',
-            betterPlan: '',
-            betterMove: stockfishBestMove, // CRITICAL: Use ONLY Stockfish's top recommendation
-            playerColor: gameIndex.get(gnum)?.playerColor || 'unknown',
-            centipawnLoss: m.scoreDrop || 0
-          });
-          usedGames.add(gnum);
-          console.log(`  -> Game ${gnum} marked as used. Used games now:`, Array.from(usedGames));
-          if (out.length >= 3) break;
+
+        const m = mistakes.find(mm => Number(mm.moveNumber) >= 16 && (Number(mm.scoreDrop) || 0) >= 80 && (Number(mm.moveNumber) % 2 === 1));
+        if (!m) continue;
+
+        const userMove = getUserMoveAt(gnum, m.moveNumber);
+        if (!userMove) {
+          console.log(`  -> Skipped Game ${gnum}: user move not found at move ${m.moveNumber}`);
+          continue;
+    }
+
+        if (!isMoveAcceptable(m, userMove.san)) {
+          continue;
         }
+
+            const stockfishBestMove = m.bestMove || '';
+        if (!stockfishBestMove) {
+          console.log(`  -> Warning: No Stockfish best move in mistake data for Game ${gnum}, Move ${m.moveNumber}`);
+          continue;
+        }
+        console.log(`  -> ✓ Stockfish best move: ${stockfishBestMove}`);
+
+        const fallbackJustification = generateJustificationFromMistake(m, userMove.san, stockfishBestMove, w.title);
+        const fallbackPlan = generateBetterPlanFromMistake(m, stockfishBestMove, w.title);
+
+        out.push({
+          gameNumber: gnum,
+          moveNumber: m.moveNumber,
+          played: userMove.san,
+          fen: userMove.fenBefore || m.previousFen || m.fen,
+          justification: fallbackJustification,
+          betterPlan: fallbackPlan,
+          betterMove: stockfishBestMove,
+          playerColor: gameIndex.get(gnum)?.playerColor || 'unknown',
+          centipawnLoss: m.scoreDrop || 0
+        });
+        usedGames.add(gnum);
+        console.log(`  -> Game ${gnum} marked as used. Used games now:`, Array.from(usedGames));
+        if (out.length >= 3) break;
       }
     }
 
@@ -1731,55 +1771,59 @@ Begin your analysis now.` + JSON.stringify(compactGames);
         const gnum = Number(ex?.gameNumber);
         const mv = Number(ex?.moveNumber);
         if (!gnum || !mv) continue;
-        
+        if (mv % 2 === 0) continue;
+
         const userMove = getUserMoveAt(gnum, mv);
-        if (userMove) {
-          console.log(`  -> ✓ Fallback: Using Game ${gnum}, Move ${mv}: ${userMove.san}`);
-          
-          // Find the corresponding mistake to get Stockfish's best move
-          const mistakes = mistakesByGameNumber.get(gnum) || [];
-          const matchingMistake = mistakes.find(m => Number(m.moveNumber) === mv);
-          
-          // CRITICAL: Use Stockfish's best move, never Gemini's suggestion
-          const stockfishBestMove = matchingMistake?.bestMove || '';
-          
-          if (!stockfishBestMove) {
-            console.log(`  -> Warning: No Stockfish best move found for fallback Game ${gnum}, Move ${mv}`);
-          } else {
-            console.log(`  -> ✓ Stockfish best move: ${stockfishBestMove}`);
-          }
-          
-          out.push({
-            gameNumber: gnum,
-            moveNumber: mv,
-            played: userMove.san, // User's actual move
-            fen: userMove.fenBefore, // Position BEFORE the user's move
-            justification: ex.justification || '',
-            betterPlan: ex.betterPlan || '',
-            betterMove: stockfishBestMove, // CRITICAL: Use ONLY Stockfish's top recommendation
-            playerColor: gameIndex.get(gnum)?.playerColor || 'unknown',
-            centipawnLoss: matchingMistake?.scoreDrop || 0
-          });
-          if (out.length >= 2) break;
+        if (!userMove) continue;
+
+        const mistakes = mistakesByGameNumber.get(gnum) || [];
+        const matchingMistake = mistakes.find(m => Number(m.moveNumber) === mv);
+        if (!isMoveAcceptable(matchingMistake, userMove.san, ex.played)) {
+          continue;
         }
+
+        const stockfishBestMove = matchingMistake?.bestMove || '';
+        if (!stockfishBestMove) {
+          console.log(`  -> Warning: No Stockfish best move found for fallback Game ${gnum}, Move ${mv}`);
+          continue;
+        }
+        console.log(`  -> ✓ Stockfish best move: ${stockfishBestMove}`);
+
+        out.push({
+          gameNumber: gnum,
+          moveNumber: mv,
+          played: userMove.san,
+          fen: userMove.fenBefore,
+          justification: ex.justification || '',
+          betterPlan: ex.betterPlan || '',
+          betterMove: stockfishBestMove,
+          playerColor: gameIndex.get(gnum)?.playerColor || 'unknown',
+          centipawnLoss: matchingMistake?.scoreDrop || 0
+        });
+        if (out.length >= 2) break;
       }
     }
 
-    // Ensure uniqueness by game:move and validate user moves
     const seen = new Set();
     const uniq = out.filter(ex => {
       const key = `${ex.gameNumber}:${ex.moveNumber}`;
       if (seen.has(key)) return false;
       seen.add(key);
-      
-      // Validate that this is actually a user move
+
       const userMove = getUserMoveAt(ex.gameNumber, ex.moveNumber);
-      return userMove !== null;
+      if (!userMove) {
+        console.log(`  -> Skipped final example: user move not found during validation`);
+        return false;
+      }
+
+      return true;
     });
+
+    uniq.sort((a, b) => (b.centipawnLoss || 0) - (a.centipawnLoss || 0));
 
     console.log(`\n--- Final result for "${w.title}": ${uniq.length} examples ---`);
     uniq.forEach((ex, i) => {
-      console.log(`  ${i + 1}. Game ${ex.gameNumber}, Move ${ex.moveNumber}: ${ex.played} (${ex.playerColor})`);
+      console.log(`  ${i + 1}. Game ${ex.gameNumber}, Move ${ex.moveNumber}: ${ex.played} (${ex.playerColor}) [Δcp ${ex.centipawnLoss}]`);
     });
     console.log(`=== End grounding for "${w.title}" ===\n`);
 
