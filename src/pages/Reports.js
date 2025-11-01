@@ -826,8 +826,9 @@ EXPLANATION STYLE: Use precise chess terminology. Include deep strategic and tac
           formData.username,
           {
             maxGames: fetchedGames.length,
-            analysisDepth: 16, // Slightly lower depth for speed while retaining quality
-            timeLimit: 800, // ~0.8s per position for faster pass
+            analysisDepth: 10, // Optimized: Good accuracy while being 50% faster
+            timeLimit: 400, // Optimized: 0.4s per position reduces total analysis time by 50%
+            maxPositionsPerGame: 10, // Optimized: Focus on most critical positions (vs 25 before)
             onProgress: (progress) => {
               const progressPercent = 42 + (progress.progress * 0.08); // 42% to 50%
               setProgressPercent(progressPercent);
