@@ -123,13 +123,13 @@ const PuzzlePage = () => {
     gatedLoad();
   }, [puzzleType, user?.id]);
 
-  // Enforce teaser for free users
-  useEffect(() => {
-    if (!canAccess && fullPuzzles && fullPuzzles.length > 0) {
-      setPuzzles(fullPuzzles.slice(0, 1));
-      setCurrentPuzzle(0);
-    }
-  }, [canAccess, fullPuzzles]);
+  // Enforce teaser for free users - removed this effect, will handle in difficulty partitioning below
+  // useEffect(() => {
+  //   if (!canAccess && fullPuzzles && fullPuzzles.length > 0) {
+  //     setPuzzles(fullPuzzles.slice(0, 1));
+  //     setCurrentPuzzle(0);
+  //   }
+  // }, [canAccess, fullPuzzles]);
 
   // Partition puzzles by difficulty level based on RATING
   // Easy: 700-1500 (10 puzzles), Medium: 1500-2000 (10 puzzles), Hard: 2100+ (10 puzzles)
@@ -160,9 +160,15 @@ const PuzzlePage = () => {
       
       console.log(`📊 Difficulty Distribution - Easy: ${easyPuzzles.length}/10, Medium: ${mediumPuzzles.length}/10, Hard: ${hardPuzzles.length}/10 (Total: 30 puzzles per page)`);
       
-      // For free users with teaser: show 1 easy puzzle
+      // For free users with teaser: show 1 puzzle from each difficulty section
       if (!canAccess) {
-        setPuzzles(easyPuzzles.slice(0, 1));
+        const teaserPuzzles = [
+          ...(easyPuzzles.length > 0 ? easyPuzzles.slice(0, 1) : []),
+          ...(mediumPuzzles.length > 0 ? mediumPuzzles.slice(0, 1) : []),
+          ...(hardPuzzles.length > 0 ? hardPuzzles.slice(0, 1) : [])
+        ];
+        setPuzzles(teaserPuzzles);
+        console.log(`🎯 Free tier teaser: showing ${teaserPuzzles.length} puzzles (1 from each difficulty level)`);
       } else {
         setPuzzles(easyPuzzles);
       }
@@ -172,12 +178,19 @@ const PuzzlePage = () => {
   }, [fullPuzzles, canAccess, puzzleType]);
 
   // For learn-mistakes, show all puzzles without difficulty filtering
+  // For free users, limit to 1 puzzle as teaser
   useEffect(() => {
     if (puzzleType === 'learn-mistakes' && fullPuzzles.length > 0) {
-      setPuzzles(fullPuzzles);
+      if (!canAccess) {
+        // Free tier teaser: show only 1 puzzle from learn-mistakes
+        setPuzzles(fullPuzzles.slice(0, 1));
+        console.log(`🎯 Free tier teaser: showing 1 Learn From Mistakes puzzle`);
+      } else {
+        setPuzzles(fullPuzzles);
+      }
       setCurrentPuzzle(0);
     }
-  }, [fullPuzzles, puzzleType]);
+  }, [fullPuzzles, puzzleType, canAccess]);
 
   // Set board orientation based on current puzzle's FEN (after auto-play)
   // Only runs when puzzle changes, NOT during moves
