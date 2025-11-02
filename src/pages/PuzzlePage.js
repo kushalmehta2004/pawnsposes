@@ -164,7 +164,7 @@ const PuzzlePage = () => {
   // }, [canAccess, fullPuzzles]);
 
   // Partition puzzles by difficulty level based on RATING
-  // Easy: 700-1500 (10 puzzles), Medium: 1500-2000 (10 puzzles), Hard: 2100+ (10 puzzles)
+  // Easy: 700-1500 (10 puzzles), Medium: 1500-2000 (10 puzzles), Hard: 2000+ (10 puzzles)
   // Total: 30 puzzles per page
   // NOTE: learn-mistakes uses dynamically generated puzzles with pre-assigned difficulties, so skip this
   useEffect(() => {
@@ -181,7 +181,7 @@ const PuzzlePage = () => {
       
       const hardPuzzles = fullPuzzles.filter(p => {
         const rating = p.rating || 0;
-        return rating >= 2100;
+        return rating >= 2000;
       }).slice(0, 10);
       
       setPuzzlesByDifficulty({
@@ -656,6 +656,7 @@ const PuzzlePage = () => {
             
             if (puzzleType !== 'learn-mistakes') {
               // Partition puzzles by rating to match UI display
+              // Easy: 700-1500, Medium: 1500-2000, Hard: 2000+ (no gap!)
               const easyPuzzles = filteredPuzzles.filter(p => {
                 const rating = p.rating || 0;
                 return rating >= 700 && rating < 1500;
@@ -668,7 +669,7 @@ const PuzzlePage = () => {
               
               const hardPuzzles = filteredPuzzles.filter(p => {
                 const rating = p.rating || 0;
-                return rating >= 2100;
+                return rating >= 2000;
               }).slice(0, 10);
               
               // Combine in order: easy, then medium, then hard (as they appear in UI tabs)
@@ -677,10 +678,10 @@ const PuzzlePage = () => {
               console.log(`📊 Partitioned puzzles for storage: Easy=${easyPuzzles.length}, Medium=${mediumPuzzles.length}, Hard=${hardPuzzles.length}, Total=${puzzlesToStore.length}`);
             }
             
-            // For free users, store only the first puzzle (teaser)
-            if (!canAccess) {
-              puzzlesToStore = puzzlesToStore.slice(0, 1);
-            }
+            // ✅ CRITICAL FIX: Store ALL puzzles to Supabase, don't limit for free users
+            // The teaser restriction should be applied on DISPLAY, not on STORAGE
+            // This ensures free users still see 1 puzzle from each difficulty on subsequent visits
+            // If we store only 1 puzzle, free users will never see the teaser from other difficulties
             
             // Store the puzzles to Supabase
             const storedCount = await puzzleAccessService.storePuzzlesToSupabase(
@@ -1187,13 +1188,15 @@ const PuzzlePage = () => {
   };
 
   const handleDifficultyChange = (newDifficulty) => {
-    if (!canAccess && newDifficulty !== 'easy') {
+    // Allow switching to any difficulty that has puzzles available
+    // Free tier: 1 teaser per difficulty, Paid tier: 10 per difficulty
+    const selectedPuzzles = puzzlesByDifficulty[newDifficulty];
+    if (!selectedPuzzles || selectedPuzzles.length === 0) {
       setShowUpgradeNotice(true);
       return;
     }
     
     setDifficulty(newDifficulty);
-    const selectedPuzzles = puzzlesByDifficulty[newDifficulty];
     setPuzzles(selectedPuzzles);
     setCurrentPuzzle(0);
     setFeedback('');
@@ -1268,8 +1271,8 @@ const PuzzlePage = () => {
                     className="px-3 py-1.5 border border-gray-300 rounded-md bg-white text-sm font-medium text-gray-700 hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer transition-colors"
                   >
                     <option value="easy">Easy</option>
-                    {canAccess && <option value="medium">Medium</option>}
-                    {canAccess && <option value="hard">Hard</option>}
+                    {puzzlesByDifficulty.medium.length > 0 && <option value="medium">Medium</option>}
+                    {puzzlesByDifficulty.hard.length > 0 && <option value="hard">Hard</option>}
                   </select>
                 </div>
               )}
@@ -1302,7 +1305,7 @@ const PuzzlePage = () => {
               </div>
               {!canAccess && (
                 <div className="text-xs text-amber-700 mt-1">
-                  Free teaser: showing 1 of {fullPuzzles?.length || puzzles.length}. Unlock the rest below.
+                  Free teaser
                 </div>
               )}
             </div>
@@ -1660,6 +1663,17 @@ const PuzzlePage = () => {
                   </div>
                 </div>
               )}
+
+              {/* Licensing Attribution */}
+              <div className="border-t border-gray-200 mt-4 pt-3">
+                <p className="text-xs text-gray-500">
+                  Some puzzles are generated using open data from 
+                  <a href="https://lichess.org" target="_blank" rel="noopener noreferrer" className="text-gray-600 hover:text-gray-800 transition-colors ml-1 underline">
+                    lichess.org
+                  </a>
+                  <span className="ml-1">(CC BY SA 3.0)</span>
+                </p>
+              </div>
             </div>
 
             {showUpgradeNotice && (
