@@ -19,6 +19,13 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
   const [moveResult, setMoveResult] = useState(null);
   const [orientation, setOrientation] = useState('white');
   const [isInitialized, setIsInitialized] = useState(false);
+  
+  // Auto-stepback feature for incorrect moves
+  const [autoStepbackCountdown, setAutoStepbackCountdown] = React.useState(null);
+  const [isStepbackAnimating, setIsStepbackAnimating] = React.useState(false); // Smooth animation when stepback occurs
+  const autoStepbackTimeoutRef = React.useRef(null);
+  const autoStepbackToastIdRef = React.useRef(null);
+  const autoStepbackPreMovePositionRef = React.useRef(null); // Store position before the wrong move
 
   const nextHintMove = useMemo(() => {
     if (!puzzle?.lineUci) return null;
@@ -49,6 +56,18 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
   const hasTextHint = typeof puzzle?.hint === 'string' && puzzle.hint.trim().length > 0;
   const canShowHint = Boolean(nextHintMove) || hasTextHint;
 
+  // Cleanup auto-stepback timer on component unmount or close
+  useEffect(() => {
+    return () => {
+      if (autoStepbackTimeoutRef.current) {
+        clearTimeout(autoStepbackTimeoutRef.current);
+      }
+      if (autoStepbackToastIdRef.current) {
+        toast.dismiss(autoStepbackToastIdRef.current);
+      }
+    };
+  }, []);
+
   // Initialize puzzle - MATCHES SinglePuzzleSolverModal logic
   useEffect(() => {
     if (!entry?.puzzle) {
@@ -56,6 +75,17 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
       setPuzzle(null);
       return;
     }
+
+    // Cancel auto-stepback when entry changes
+    if (autoStepbackTimeoutRef.current) {
+      clearTimeout(autoStepbackTimeoutRef.current);
+      autoStepbackTimeoutRef.current = null;
+    }
+    if (autoStepbackToastIdRef.current) {
+      toast.dismiss(autoStepbackToastIdRef.current);
+      autoStepbackToastIdRef.current = null;
+    }
+    setAutoStepbackCountdown(null);
 
     try {
       // Extract initial FEN
@@ -134,6 +164,17 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
 
   // EXACT REPLICA OF SinglePuzzleSolverModal handleResetPuzzle
   const handleResetPuzzle = () => {
+    // Cancel auto-stepback timer if running
+    if (autoStepbackTimeoutRef.current) {
+      clearTimeout(autoStepbackTimeoutRef.current);
+      autoStepbackTimeoutRef.current = null;
+    }
+    if (autoStepbackToastIdRef.current) {
+      toast.dismiss(autoStepbackToastIdRef.current);
+      autoStepbackToastIdRef.current = null;
+    }
+    setAutoStepbackCountdown(null);
+
     if (!puzzle) return;
 
     setFeedback('');
@@ -174,8 +215,118 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
     }));
   };
 
+  // ⏱️ AUTO-STEPBACK: 5-second countdown timer for wrong moves
+  const startAutoStepback = () => {
+    // Cancel any existing timer first
+    if (autoStepbackTimeoutRef.current) {
+      clearTimeout(autoStepbackTimeoutRef.current);
+      autoStepbackTimeoutRef.current = null;
+    }
+    if (autoStepbackToastIdRef.current) {
+      toast.dismiss(autoStepbackToastIdRef.current);
+      autoStepbackToastIdRef.current = null;
+    }
+
+    // Capture the position BEFORE the wrong move was made (saved in the ref)
+    const preMovePosition = autoStepbackPreMovePositionRef.current;
+    let countdown = 5;
+    setAutoStepbackCountdown(5);
+
+    if (!preMovePosition) {
+      console.warn('❌ No pre-move position saved for auto-stepback');
+      return;
+    }
+
+    console.log('🔄 Auto-stepback initialized. Will revert to pre-move position:', preMovePosition);
+
+    // Show initial toast - simple notification
+    autoStepbackToastIdRef.current = toast.custom(
+      (t) => (
+        <div className="bg-red-500 rounded-lg px-4 py-3 shadow text-center">
+          <div className="text-sm font-medium text-white">
+            ❌ Resetting in {countdown}s…
+          </div>
+        </div>
+      ),
+      {
+        duration: Infinity,
+        position: 'top-center',
+        style: {
+          zIndex: 9999,
+          marginTop: '10px'
+        }
+      }
+    );
+
+    // Execute step-back after 5 seconds using pre-move position
+    autoStepbackTimeoutRef.current = setTimeout(() => {
+      console.log('⏱️ Auto-stepback timer complete. Reverting position.');
+      
+      if (autoStepbackToastIdRef.current) {
+        toast.dismiss(autoStepbackToastIdRef.current);
+        autoStepbackToastIdRef.current = null;
+      }
+
+      try {
+        console.log('✅ Reverting to pre-move position:', preMovePosition);
+
+        // Enable smooth animation for the stepback
+        setIsStepbackAnimating(true);
+
+        setMoveResult(null);
+        setFeedback('');
+        setShowSolution(false);
+        setShowHint(false);
+        setAutoStepbackCountdown(null);
+        
+        // Simply restore the position from before the wrong move
+        setPuzzle(prev => ({
+          ...prev,
+          position: preMovePosition,
+          completed: false
+        }));
+
+        // Show success toast
+        toast.custom(
+          (t) => (
+            <div className="bg-green-500 rounded-lg px-4 py-3 shadow text-center">
+              <div className="text-sm font-medium text-white">
+                ✅ Position reset
+              </div>
+            </div>
+          ),
+          {
+            duration: 2000,
+            position: 'top-center',
+            style: {
+              zIndex: 9999,
+              marginTop: '20px'
+            }
+          }
+        );
+      } catch (error) {
+        console.error('❌ Error during auto-stepback:', error);
+        setAutoStepbackCountdown(null);
+      }
+
+      autoStepbackTimeoutRef.current = null;
+      autoStepbackPreMovePositionRef.current = null; // Clear the saved position
+    }, 5000);
+  };
+
   // EXACT REPLICA OF SinglePuzzleSolverModal handleStepBack
   const handleStepBack = () => {
+    // Cancel auto-stepback timer if running
+    if (autoStepbackTimeoutRef.current) {
+      clearTimeout(autoStepbackTimeoutRef.current);
+      autoStepbackTimeoutRef.current = null;
+    }
+    if (autoStepbackToastIdRef.current) {
+      toast.dismiss(autoStepbackToastIdRef.current);
+      autoStepbackToastIdRef.current = null;
+    }
+    setAutoStepbackCountdown(null);
+
     if (!puzzle) return;
 
     try {
@@ -342,7 +493,17 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
       // Multi-move puzzle
       const expectedUci = (tokens[curIdx] || '').toLowerCase();
       if (expectedUci && expectedUci === playedUci.toLowerCase()) {
-        // ✅ Correct move
+        // ✅ Correct move - cancel auto-stepback timer
+        if (autoStepbackTimeoutRef.current) {
+          clearTimeout(autoStepbackTimeoutRef.current);
+          autoStepbackTimeoutRef.current = null;
+        }
+        if (autoStepbackToastIdRef.current) {
+          toast.dismiss(autoStepbackToastIdRef.current);
+          autoStepbackToastIdRef.current = null;
+        }
+        setAutoStepbackCountdown(null);
+
         setMoveResult({ square: to, isCorrect: true });
         setTimeout(() => setMoveResult(null), 800);
 
@@ -405,11 +566,18 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
         setMoveResult({ square: to, isCorrect: false });
         setTimeout(() => setMoveResult(null), 800);
 
+        // Save the position BEFORE the wrong move for auto-stepback
+        autoStepbackPreMovePositionRef.current = puzzle.position;
+
         setPuzzle(prev => ({
           ...prev,
           position: fen  // Keep the wrong move visible
         }));
         setFeedback(`Not quite. You played ${san}. Try again or show a hint.`);
+        
+        // ⏱️ Start auto-stepback countdown
+        startAutoStepback();
+        
         return false;
       }
     } else {
@@ -425,7 +593,17 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
       const isUciCorrect = playedUci === targetUci && targetUci;
       
       if (isSanCorrect || isUciCorrect) {
-        // ✅ Correct move
+        // ✅ Correct move - cancel auto-stepback timer
+        if (autoStepbackTimeoutRef.current) {
+          clearTimeout(autoStepbackTimeoutRef.current);
+          autoStepbackTimeoutRef.current = null;
+        }
+        if (autoStepbackToastIdRef.current) {
+          toast.dismiss(autoStepbackToastIdRef.current);
+          autoStepbackToastIdRef.current = null;
+        }
+        setAutoStepbackCountdown(null);
+
         setMoveResult({ square: to, isCorrect: true });
         setTimeout(() => setMoveResult(null), 800);
 
@@ -441,7 +619,33 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
         setMoveResult({ square: to, isCorrect: false });
         setTimeout(() => setMoveResult(null), 800);
 
+        // Save the position BEFORE the wrong move for auto-stepback
+        // Note: We need to calculate the position before the wrong move since it was already updated above
+        try {
+          const engine = new Chess(puzzle.initialPosition || puzzle.position);
+          const startIdx = typeof puzzle.startLineIndex === 'number' ? puzzle.startLineIndex : 0;
+          const curIdx = typeof puzzle.lineIndex === 'number' ? puzzle.lineIndex : startIdx;
+          const tokens = (puzzle.lineUci || '').split(/\s+/).filter(Boolean);
+          // Replay moves up to current index to get the position before the wrong move
+          for (let i = 0; i < curIdx; i++) {
+            const u = tokens[i];
+            if (!/^[a-h][1-8][a-h][1-8](?:[qrbn])?$/i.test(u)) break;
+            const from = u.slice(0, 2);
+            const to = u.slice(2, 4);
+            const prom = u.length > 4 ? u[4] : undefined;
+            engine.move({ from, to, promotion: prom });
+          }
+          autoStepbackPreMovePositionRef.current = engine.fen();
+        } catch (e) {
+          // Fallback: use initial position if calculation fails
+          autoStepbackPreMovePositionRef.current = puzzle.initialPosition || puzzle.position;
+        }
+
         setFeedback(`Not quite. You played ${san}. Try again or show a hint.`);
+        
+        // ⏱️ Start auto-stepback countdown
+        startAutoStepback();
+        
         return false;
       }
     }
@@ -493,6 +697,7 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
                   preserveDrawingsOnPositionChange={true}
                   moveResult={moveResult}
                   highlightedSquares={showHint && nextHintMove?.uci ? [nextHintMove.uci.slice(0, 2)] : []}
+                  isStepback={isStepbackAnimating}
                   onMove={handleMove}
                   disabled={puzzle?.completed}
                 />

@@ -18,12 +18,15 @@ const Chessboard = ({
   preserveDrawingsOnPositionChange = false, // keep drawings when position updates
   onDrawChange,          // optional callback({ arrows, circles })
   moveResult = null,     // { square, isCorrect } - shows checkmark/X on destination square
-  disabled = false       // disable all interactions when true
+  disabled = false,      // disable all interactions when true
+  isStepback = false     // smooth animation when pieces step back (auto-undo)
 }) => {
   // Internal chess engine for legal moves and updates
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [legalTargets, setLegalTargets] = useState([]);
   const [localFen, setLocalFen] = useState(position);
+  const [animatingStepback, setAnimatingStepback] = useState(false);
+  const stepbackTimeoutRef = useRef(null);
 
   // Reset local state when external position changes
   useEffect(() => {
@@ -31,6 +34,25 @@ const Chessboard = ({
     setSelectedSquare(null);
     setLegalTargets([]);
   }, [position]);
+
+  // Handle stepback animation
+  useEffect(() => {
+    if (isStepback) {
+      setAnimatingStepback(true);
+      // Clear the stepback flag after animation completes (800ms)
+      if (stepbackTimeoutRef.current) {
+        clearTimeout(stepbackTimeoutRef.current);
+      }
+      stepbackTimeoutRef.current = setTimeout(() => {
+        setAnimatingStepback(false);
+      }, 800);
+    }
+    return () => {
+      if (stepbackTimeoutRef.current) {
+        clearTimeout(stepbackTimeoutRef.current);
+      }
+    };
+  }, [isStepback]);
 
   // Arrow/circle drawing state
   const [drawnArrows, setDrawnArrows] = useState([]); // [{ from, to, color }]
@@ -466,12 +488,15 @@ const Chessboard = ({
             {currentPiecesWithIds.map(p => {
               const code = p.color === 'w' ? p.type.toUpperCase() : p.type.toLowerCase();
               const { x, y } = squareToXY(p.square);
+              // Use longer duration for stepback animation (smooth return), shorter for normal moves
+              const transitionDuration = animatingStepback ? '800ms' : '300ms';
+              const transitionTiming = animatingStepback ? 'cubic-bezier(0.34, 1.56, 0.64, 1)' : 'cubic-bezier(0.25, 0.46, 0.45, 0.94)'; // Spring-like easing for stepback
               const pieceStyle = {
                 ...pieceImgBaseStyle,
                 position: 'absolute',
                 transform: `translate(${x}px, ${y}px)`,
-                // Smooth Lichess-style animation: longer duration + cubic-bezier easing
-                transition: suppressTransitions ? 'none' : 'transform 300ms cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+                // Smooth animation: longer duration + enhanced easing for stepback, normal for regular moves
+                transition: suppressTransitions ? 'none' : `transform ${transitionDuration} ${transitionTiming}`,
                 willChange: 'transform', // GPU acceleration hint
               };
               return (
