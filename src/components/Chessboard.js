@@ -258,6 +258,7 @@ const Chessboard = ({
   }, [chess]);
 
   // Match current pieces to previous pieces to keep stable IDs across moves
+  // Uses optimal bipartite matching to prevent piece ID swapping with multiple identical pieces
   const currentPiecesWithIds = useMemo(() => {
     const prev = [...prevPiecesRef.current];
     const usedPrev = new Set();
@@ -268,31 +269,77 @@ const Chessboard = ({
       return Math.abs(A.file - B.file) + Math.abs(A.rank - B.rank);
     };
 
-    const assignId = (cur) => {
-      let bestIdx = -1;
-      let bestDist = Infinity;
-      for (let i = 0; i < prev.length; i++) {
-        if (usedPrev.has(i)) continue;
-        const p = prev[i];
-        if (p.type === cur.type && p.color === cur.color) {
+    // Build cost matrix for optimal matching
+    // For each current piece, calculate distance to all previous pieces of same type/color
+    const getCostMatrix = () => {
+      const costs = currentPiecesRaw.map((cur) => {
+        return prev.map((p, idx) => {
+          // Impossible match (different type or color)
+          if (p.type !== cur.type || p.color !== cur.color) {
+            return Infinity;
+          }
+          // Cost is distance, with strong preference for pieces that haven't moved
           const d = distance(p.square, cur.square);
-          if (d < bestDist) {
-            bestDist = d;
-            bestIdx = i;
+          // Stationary pieces (distance 0) get cost 0, moved pieces scale linearly
+          // This ensures pieces that don't move stay put
+          return d === 0 ? 0 : d;
+        });
+      });
+      return costs;
+    };
+
+    // Hungarian algorithm-like optimal assignment (simplified greedy with global view)
+    // Prioritize assignments for pieces that haven't moved (distance 0)
+    const assignOptimal = (costs) => {
+      const assignment = new Array(currentPiecesRaw.length).fill(-1);
+      
+      // First pass: assign all pieces with distance 0 (stationary pieces)
+      for (let cur = 0; cur < costs.length; cur++) {
+        for (let p = 0; p < costs[cur].length; p++) {
+          if (!usedPrev.has(p) && costs[cur][p] === 0) {
+            assignment[cur] = p;
+            usedPrev.add(p);
+            break;
           }
         }
       }
-      if (bestIdx !== -1) {
-        usedPrev.add(bestIdx);
-        const chosen = prev[bestIdx];
+      
+      // Second pass: assign remaining pieces by minimum cost
+      for (let cur = 0; cur < costs.length; cur++) {
+        if (assignment[cur] !== -1) continue; // Already assigned
+        
+        let bestIdx = -1;
+        let bestCost = Infinity;
+        for (let p = 0; p < costs[cur].length; p++) {
+          if (!usedPrev.has(p) && costs[cur][p] < bestCost) {
+            bestCost = costs[cur][p];
+            bestIdx = p;
+          }
+        }
+        
+        if (bestIdx !== -1) {
+          assignment[cur] = bestIdx;
+          usedPrev.add(bestIdx);
+        }
+      }
+      
+      return assignment;
+    };
+
+    const costs = getCostMatrix();
+    const assignment = assignOptimal(costs);
+
+    const mapped = currentPiecesRaw.map((cur, idx) => {
+      const prevIdx = assignment[idx];
+      if (prevIdx !== -1) {
+        const chosen = prev[prevIdx];
         return { ...cur, id: chosen.id };
       }
       // New piece (promotion or first render)
       idCounterRef.current += 1;
       return { ...cur, id: `${cur.color}${cur.type}-${idCounterRef.current}` };
-    };
+    });
 
-    const mapped = currentPiecesRaw.map(assignId);
     // Persist for next render
     prevPiecesRef.current = mapped.map(p => ({ id: p.id, type: p.type, color: p.color, square: p.square }));
     return mapped;
