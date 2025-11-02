@@ -1688,36 +1688,118 @@ Return ONLY a JSON object with exactly this format (no markdown, no extra text):
                                     }}>
                                       <strong>Position:</strong> {example.fen}
                                     </p>
-                                    <button
-                                      className="pdf-link"
-                                      onClick={() => {
-                                        // Open position on Lichess analysis board
-                                        // Lichess expects FEN with spaces replaced by underscores
-                                        const fenForLichess = example.fen.replace(/ /g, '_');
-                                        const lichessUrl = `https://lichess.org/analysis/${fenForLichess}`;
-                                        window.open(lichessUrl, '_blank', 'noopener,noreferrer');
-                                      }}
-                                      data-href={`https://lichess.org/analysis/${(example.fen || '').replace(/ /g, '_')}`}
-                                      style={{
-                                        backgroundColor: '#3b82f6',
-                                        color: 'white',
-                                        padding: '0.5rem 1rem',
-                                        borderRadius: '0.375rem',
-                                        border: 'none',
-                                        fontSize: '0.875rem',
-                                        fontWeight: '500',
-                                        cursor: 'pointer',
-                                        transition: 'background-color 0.2s',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '0.5rem'
-                                      }}
-                                      onMouseEnter={(e) => e.target.style.backgroundColor = '#2563eb'}
-                                      onMouseLeave={(e) => e.target.style.backgroundColor = '#3b82f6'}
-                                    >
-                                      <i className="fas fa-external-link-alt"></i>
-                                      Analyze on Lichess
-                                    </button>
+                                    {(() => {
+                                      // Determine platform
+                                      const platform = analysis?.platform || analysis?.formData?.platform || 'lichess';
+                                      const isLichess = platform.toLowerCase() === 'lichess';
+                                      const isChessCom = platform.toLowerCase() === 'chess.com';
+                                      
+                                      // Get game URL using gameNumber - look in analysis.games first, then in analysis.gameData
+                                      const games = analysis?.games || analysis?.gameData || [];
+                                      const gameIndex = example.gameNumber ? example.gameNumber - 1 : -1;
+                                      const game = gameIndex >= 0 && gameIndex < games.length ? games[gameIndex] : null;
+                                      
+                                      // Debug logging
+                                      if (example.gameNumber === 1) {
+                                        console.log('🔍 Game Analysis Debug:', {
+                                          platform,
+                                          gameNumber: example.gameNumber,
+                                          gameIndex,
+                                          totalGames: games.length,
+                                          game: game ? { 
+                                            gameInfo: game.gameInfo,
+                                            url: game.url,
+                                            id: game.id
+                                          } : null
+                                        });
+                                      }
+                                      
+                                      // Try multiple ways to get the URL
+                                      let gameUrl = null;
+                                      
+                                      if (game?.gameInfo?.url) {
+                                        // New structure with gameInfo containing URL
+                                        gameUrl = game.gameInfo.url;
+                                      } else if (game?.url) {
+                                        // Direct URL on game object
+                                        gameUrl = game.url;
+                                      } else if (game?.id && isLichess) {
+                                        // Construct Lichess URL from ID
+                                        gameUrl = `https://lichess.org/${game.id}`;
+                                      } else if (example.gameUrl) {
+                                        // Fallback to example.gameUrl
+                                        gameUrl = example.gameUrl;
+                                      }
+                                      
+                                      if (example.gameNumber === 1 && !gameUrl) {
+                                        console.warn('⚠️ Game URL not found for game', example.gameNumber, 'Full game object:', game);
+                                      }
+                                      
+                                      // Determine button label and if disabled
+                                      const buttonLabel = 'Analyze Game';
+                                      const isDisabled = !gameUrl;
+                                      
+                                      // Build the URL to open
+                                      const getGameLink = () => {
+                                        if (!gameUrl) return null;
+                                        
+                                        // If gameUrl is already a full URL, use it
+                                        if (gameUrl.startsWith('http')) {
+                                          return gameUrl;
+                                        }
+                                        
+                                        // If it's a game ID, construct the URL based on platform
+                                        if (isChessCom) {
+                                          return `https://www.chess.com/game/rapid/${gameUrl}`;
+                                        } else {
+                                          return `https://lichess.org/${gameUrl}`;
+                                        }
+                                      };
+                                      
+                                      const gameLink = getGameLink();
+                                      
+                                      return (
+                                        <button
+                                          className="pdf-link"
+                                          onClick={() => {
+                                            if (gameLink) {
+                                              window.open(gameLink, '_blank', 'noopener,noreferrer');
+                                            }
+                                          }}
+                                          disabled={isDisabled}
+                                          title={isDisabled ? 'Game link unavailable' : `Open full game on ${buttonLabel.split(' ')[3]}`}
+                                          style={{
+                                            backgroundColor: isDisabled ? '#d1d5db' : '#3b82f6',
+                                            color: 'white',
+                                            padding: '0.5rem 1rem',
+                                            borderRadius: '0.375rem',
+                                            border: 'none',
+                                            fontSize: '0.875rem',
+                                            fontWeight: '500',
+                                            cursor: isDisabled ? 'not-allowed' : 'pointer',
+                                            transition: 'background-color 0.2s',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '0.5rem',
+                                            opacity: isDisabled ? 0.6 : 1
+                                          }}
+                                          onMouseEnter={(e) => {
+                                            if (!isDisabled) {
+                                              e.target.style.backgroundColor = '#2563eb';
+                                            }
+                                          }}
+                                          onMouseLeave={(e) => {
+                                            if (!isDisabled) {
+                                              e.target.style.backgroundColor = '#3b82f6';
+                                            }
+                                          }}
+                                        >
+                                          <i className="fas fa-external-link-alt"></i>
+                                          {buttonLabel}
+                                        </button>
+                                      );
+                                    })()}
+                                    
                                   </div>
                                 )}
                               </div>

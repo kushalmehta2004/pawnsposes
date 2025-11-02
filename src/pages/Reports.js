@@ -1072,7 +1072,8 @@ EXPLANATION STYLE: Use precise chess terminology. Include deep strategic and tac
                   game.black?.result === 'win' ? '0-1' : 
                   game.white?.result === 'draw' ? '1/2-1/2' : 'Unknown',
           eco: game.eco || 'Unknown',
-          timeControl: game.time_control || 'Unknown'
+          timeControl: game.time_control || 'Unknown',
+          url: game.url || ''
         };
       } else if (formData.platform === 'lichess') {
         gameInfo = {
@@ -1084,7 +1085,9 @@ EXPLANATION STYLE: Use precise chess terminology. Include deep strategic and tac
                   game.winner === 'black' ? '0-1' : 
                   !game.winner ? '1/2-1/2' : 'Unknown',
           eco: game.opening?.eco || 'Unknown',
-          timeControl: game.speed || 'Unknown'
+          timeControl: game.speed || 'Unknown',
+          id: game.id || '',
+          url: `https://lichess.org/${game.id}` || ''
         };
       }
 
@@ -1151,7 +1154,8 @@ EXPLANATION STYLE: Use precise chess terminology. Include deep strategic and tac
           endTime: new Date(game.end_time * 1000).toISOString(),
           rated: game.rated,
           eco: game.eco || 'Unknown',
-          platform: 'chess.com'
+          platform: 'chess.com',
+          url: game.url || ''
         };
       } else if (formData.platform === 'lichess') {
         gameInfo = {
@@ -1162,7 +1166,9 @@ EXPLANATION STYLE: Use precise chess terminology. Include deep strategic and tac
           endTime: new Date(game.createdAt).toISOString(),
           rated: game.rated,
           eco: game.opening?.eco || 'Unknown',
-          platform: 'lichess'
+          platform: 'lichess',
+          id: game.id,
+          url: `https://lichess.org/${game.id}`
         };
       }
       

@@ -984,10 +984,6 @@ const Dashboard = () => {
                         <span>{report.username}</span>
                       </div>
                       <div className="flex items-center gap-1">
-                        <span className="text-lg">{getPlatformIcon(report.platform)}</span>
-                        <span>{report.platform}</span>
-                      </div>
-                      <div className="flex items-center gap-1">
                         <Calendar size={16} />
                         <span>{formatDate(report.created_at)}</span>
                       </div>
