@@ -233,10 +233,18 @@ const PuzzlePage = () => {
     setMoveResult(null);
 
     // Use current position (after first move auto-play) to determine user's color
+    // Fall back to initialPosition if position is not available
     // Set once and keep it fixed - don't change during gameplay
-    if (puzzle?.position) {
-      const side = puzzle.position.split(' ')[1] === 'b' ? 'black' : 'white';
-      setOrientation(side);
+    const fenToCheck = puzzle.position || puzzle.initialPosition;
+    if (fenToCheck) {
+      try {
+        const turnIndicator = fenToCheck.split(' ')[1];
+        const side = turnIndicator === 'b' ? 'black' : 'white';
+        setOrientation(side);
+      } catch (e) {
+        console.warn('⚠️ Error extracting turn from FEN, defaulting to white');
+        setOrientation('white');
+      }
     }
 
     if (!puzzle.id) {
