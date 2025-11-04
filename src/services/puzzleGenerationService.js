@@ -464,22 +464,30 @@ class PuzzleGenerationService {
         return { ...p, difficulty, rating };
       });
 
-      if (result.length < EXACT_PUZZLES) {
-        console.warn(`⚠️ Generated ${result.length}/${EXACT_PUZZLES} puzzles from user mistakes`);
+      // Apply winning side filter: ensure user always gets to play from the winning side
+      console.log(`🎯 Filtering puzzles to ensure user always plays from winning side...`);
+      const filteredResult = await Promise.all(
+        result.map(puzzle => this.ensureWinningPuzzle(puzzle))
+      );
+      
+      if (filteredResult.length < EXACT_PUZZLES) {
+        console.warn(`⚠️ Generated ${filteredResult.length}/${EXACT_PUZZLES} puzzles from user mistakes`);
         console.warn(`💡 Import more games to generate the full set of 20 puzzles`);
       } else {
         // Count puzzles by length category
-        const longPuzzles = result.filter(p => (p.plies || 0) >= 10).length;
-        const mediumPuzzles = result.filter(p => (p.plies || 0) >= 6 && (p.plies || 0) < 10).length;
-        const shortPuzzles = result.filter(p => (p.plies || 0) < 6).length;
+        const longPuzzles = filteredResult.filter(p => (p.plies || 0) >= 10).length;
+        const mediumPuzzles = filteredResult.filter(p => (p.plies || 0) >= 6 && (p.plies || 0) < 10).length;
+        const shortPuzzles = filteredResult.filter(p => (p.plies || 0) < 6).length;
+        const flippedPuzzles = filteredResult.filter(p => p.isFlipped).length;
         
-        console.log(`✅ Successfully generated ${result.length} puzzles from user mistakes:`);
+        console.log(`✅ Successfully generated ${filteredResult.length} puzzles from user mistakes:`);
         if (longPuzzles > 0) console.log(`   📏 ${longPuzzles} long puzzles (10-16 plies = 5-8 decisions)`);
         if (mediumPuzzles > 0) console.log(`   📏 ${mediumPuzzles} medium puzzles (6-9 plies = 3-4 decisions)`);
         if (shortPuzzles > 0) console.log(`   📏 ${shortPuzzles} short puzzles (4-5 plies = 2 decisions)`);
+        if (flippedPuzzles > 0) console.log(`   🔄 ${flippedPuzzles} puzzles flipped to winning side`);
       }
       
-      return result;
+      return filteredResult;
       
     } catch (error) {
       console.error('❌ Critical error generating mistake puzzles:', error);
@@ -679,6 +687,130 @@ class PuzzleGenerationService {
       difficulty: this.getDifficultyFromEvaluation(mistake.centipawnLoss),
       source: 'user_game'
     };
+  }
+
+  /**
+   * Flip a FEN position 180 degrees (rotate the board)
+   * This changes the perspective so the opponent's side is to move
+   */
+  flipFEN(fen) {
+    if (!fen) return fen;
+    
+    try {
+      const parts = fen.split(' ');
+      if (parts.length < 6) return fen;
+      
+      const [placement, activeColor, castling, enPassant, halfmove, fullmove] = parts;
+      
+      // Flip the board position (rotate 180 degrees)
+      const rows = placement.split('/');
+      const flippedRows = rows
+        .map(row => {
+          // Expand numbers to pieces first
+          let expanded = '';
+          for (const char of row) {
+            if (/\d/.test(char)) {
+              expanded += ' '.repeat(parseInt(char));
+            } else {
+              expanded += char;
+            }
+          }
+          // Reverse and flip case
+          const reversed = expanded.split('').reverse().map(c => {
+            if (c === ' ') return c;
+            return c === c.toLowerCase() ? c.toUpperCase() : c.toLowerCase();
+          }).join('');
+          // Compress back
+          let compressed = '';
+          let spaces = 0;
+          for (const char of reversed) {
+            if (char === ' ') {
+              spaces++;
+            } else {
+              if (spaces > 0) compressed += spaces;
+              spaces = 0;
+              compressed += char;
+            }
+          }
+          if (spaces > 0) compressed += spaces;
+          return compressed;
+        })
+        .reverse()
+        .join('/');
+      
+      // Flip active color
+      const flippedColor = activeColor === 'w' ? 'b' : 'w';
+      
+      // Flip castling rights (swap K/Q with k/q)
+      let flippedCastling = castling;
+      if (castling !== '-') {
+        flippedCastling = castling
+          .split('')
+          .map(c => {
+            if (c === 'K') return 'k';
+            if (c === 'Q') return 'q';
+            if (c === 'k') return 'K';
+            if (c === 'q') return 'Q';
+            return c;
+          })
+          .join('');
+        // Sort for consistency
+        const rights = flippedCastling.split('').sort().join('');
+        flippedCastling = rights === '' ? '-' : rights;
+      }
+      
+      // Flip en passant square if it exists
+      let flippedEnPassant = '-';
+      if (enPassant !== '-' && /^[a-h][36]$/.test(enPassant)) {
+        const file = enPassant.charCodeAt(0) - 97; // a-h to 0-7
+        const rank = 9 - parseInt(enPassant[1]); // 3 or 6 flipped
+        flippedEnPassant = String.fromCharCode(97 + (7 - file)) + rank;
+      }
+      
+      return `${flippedRows} ${flippedColor} ${flippedCastling} ${flippedEnPassant} ${halfmove} ${fullmove}`;
+    } catch (err) {
+      console.error('Error flipping FEN:', err);
+      return fen;
+    }
+  }
+
+  /**
+   * Check if a position is losing for the side to move (evaluation < -250 cp)
+   * If so, flip the board so the user gets the winning side
+   */
+  async ensureWinningPuzzle(puzzle) {
+    try {
+      // Quick evaluation to check if position is too losing
+      const analysis = await stockfishAnalyzer.analyzePositionDeep(puzzle.position, 12, 200);
+      
+      // If position evaluates to losing (< -250 cp), flip the board
+      if (analysis?.evaluation?.type === 'cp' && analysis.evaluation.value < -250) {
+        console.log(`⚠️ Position was losing (eval: ${analysis.evaluation.value} cp) - flipping to winning side for user...`);
+        
+        // Flip the entire position
+        const flippedFEN = this.flipFEN(puzzle.position);
+        const flippedAnalysis = await stockfishAnalyzer.analyzePositionDeep(flippedFEN, 12, 200);
+        
+        // Get the best move in the flipped position
+        const bestMove = flippedAnalysis?.bestMove || '';
+        
+        return {
+          ...puzzle,
+          position: flippedFEN,
+          solution: bestMove,
+          sideToMove: puzzle.sideToMove === 'white' ? 'black' : 'white',
+          objective: `Find the best move to exploit your opponent's weakness from your game.`,
+          explanation: `In this critical position, playing the strong move is key to converting your advantage.`,
+          isFlipped: true
+        };
+      }
+      
+      return puzzle;
+    } catch (err) {
+      console.error('Error ensuring winning puzzle:', err);
+      // If analysis fails, return original puzzle
+      return puzzle;
+    }
   }
 
   /**
