@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
-import { Loader2, ArrowLeft, Eye, EyeOff, RotateCcw, Undo2 } from 'lucide-react';
+import { Loader2, ArrowLeft, Eye, EyeOff, RotateCcw, Undo2, Repeat2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Chess } from 'chess.js';
 import Chessboard from '../components/Chessboard';
@@ -1217,6 +1217,10 @@ const PuzzlePage = () => {
     navigate('/report-display', { state: { analysis: analysisData } });
   };
 
+  const handleFlipBoard = () => {
+    setOrientation(prev => prev === 'white' ? 'black' : 'white');
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center" style={{ paddingTop: '80px' }}>
@@ -1596,6 +1600,15 @@ const PuzzlePage = () => {
                   >
                     <RotateCcw size={16} className="mr-1" />
                     Reset
+                  </button>
+
+                  <button
+                    onClick={handleFlipBoard}
+                    className="flex-1 px-4 py-2.5 bg-indigo-500 text-white rounded-lg font-medium hover:bg-indigo-600 transition-colors flex items-center justify-center"
+                    title="Flip the board perspective"
+                  >
+                    <Repeat2 size={16} className="mr-1" />
+                    Flip
                   </button>
                 </div>
 
