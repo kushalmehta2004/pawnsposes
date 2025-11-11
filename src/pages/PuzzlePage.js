@@ -1209,7 +1209,6 @@ const PuzzlePage = () => {
     setCurrentPuzzle(0);
     setFeedback('');
     setShowSolution(false);
-    toast.success(`Switched to ${newDifficulty.charAt(0).toUpperCase() + newDifficulty.slice(1)} puzzles`);
   };
 
   const handleBackToReport = () => {
