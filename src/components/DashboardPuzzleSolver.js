@@ -215,7 +215,7 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
     }));
   };
 
-  // ⏱️ AUTO-STEPBACK: 5-second countdown timer for wrong moves
+  // ⏱️ AUTO-STEPBACK: 1-second countdown timer for wrong moves
   const startAutoStepback = () => {
     // Cancel any existing timer first
     if (autoStepbackTimeoutRef.current) {
@@ -229,8 +229,8 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
 
     // Capture the position BEFORE the wrong move was made (saved in the ref)
     const preMovePosition = autoStepbackPreMovePositionRef.current;
-    let countdown = 5;
-    setAutoStepbackCountdown(5);
+    let countdown = 1;
+    setAutoStepbackCountdown(1);
 
     if (!preMovePosition) {
       console.warn('❌ No pre-move position saved for auto-stepback');
@@ -258,7 +258,7 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
       }
     );
 
-    // Execute step-back after 5 seconds using pre-move position
+    // Execute step-back after 1 second using pre-move position
     autoStepbackTimeoutRef.current = setTimeout(() => {
       console.log('⏱️ Auto-stepback timer complete. Reverting position.');
       
@@ -311,7 +311,7 @@ const DashboardPuzzleSolver = ({ entry, onClose }) => {
 
       autoStepbackTimeoutRef.current = null;
       autoStepbackPreMovePositionRef.current = null; // Clear the saved position
-    }, 5000);
+    }, 1000);
   };
 
   // EXACT REPLICA OF SinglePuzzleSolverModal handleStepBack

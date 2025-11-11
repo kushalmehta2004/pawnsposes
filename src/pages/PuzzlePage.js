@@ -1046,8 +1046,8 @@ const PuzzlePage = () => {
       toast.dismiss(autoStepbackToastIdRef.current);
     }
 
-    const STEPBACK_DELAY = 5000; // 5 seconds
-    let remainingTime = 5;
+    const STEPBACK_DELAY = 1000; // 1 second
+    let remainingTime = 1;
     
     // Capture the position BEFORE the wrong move was made (saved in the ref)
     const preMovePosition = autoStepbackPreMovePositionRef.current;
@@ -1443,7 +1443,7 @@ const PuzzlePage = () => {
                       // Reset streak on incorrect move
                       setCurrentStreak(0);
                       
-                      // Start 5-second countdown before auto-stepback
+                      // Start 1-second countdown before auto-stepback
                       startAutoStepback();
                     }
                   } else {
@@ -1485,7 +1485,7 @@ const PuzzlePage = () => {
                       // Reset streak on incorrect move
                       setCurrentStreak(0);
                       
-                      // Start 5-second countdown before auto-stepback
+                      // Start 1-second countdown before auto-stepback
                       startAutoStepback();
                     }
                   }
