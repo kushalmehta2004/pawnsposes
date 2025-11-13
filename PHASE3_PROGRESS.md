@@ -6,8 +6,8 @@ Phase 3 implements the puzzle access control system based on the "Report Free �
 
 **Pricing Model:**
 - **Free Tier**: 1 full PDF report + 1 teaser puzzle per category (4 total)
-- **One-Time Pack**: $4.99 to unlock all puzzles from the free report
-- **Subscription Plans**: Monthly ($6.99), Quarterly ($18.99), Annual ($59.99) with full puzzle access
+- **One-Time Pack**: ₹442 to unlock all puzzles from the free report
+- **Subscription Plans**: Monthly (₹619), Quarterly (₹1682), Annual (₹5314) with full puzzle access
 
 ## ✅ Completed Steps
 

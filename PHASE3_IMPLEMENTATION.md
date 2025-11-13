@@ -13,12 +13,12 @@ This phase implements the puzzle locking/unlocking system based on the **Report 
 - ❌ No access to remaining puzzles
 
 ### Subscription Plans
-- **Monthly ($6.99)**: Weekly puzzles unlocked (4 sections), refreshed weekly
-- **Quarterly ($18.99)**: 3 months of weekly puzzle access (12 sets)
-- **Annual ($59.99)**: Full-year access (52 sets), priority features
+- **Monthly (₹619)**: Weekly puzzles unlocked (4 sections), refreshed weekly
+- **Quarterly (₹1682)**: 3 months of weekly puzzle access (12 sets)
+- **Annual (₹5314)**: Full-year access (52 sets), priority features
 
 ### One-Time Pack
-- **$4.99**: Unlock all puzzles from the free report (cheap entry point)
+- **₹442**: Unlock all puzzles from the free report (cheap entry point)
 
 ---
 
@@ -107,7 +107,7 @@ Retrieves all puzzles for a user with optional filters:
 - `reportId`: Filter by report
 
 #### `unlockPuzzlesOneTime(userId, reportId, paymentId, amountPaid)`
-Unlocks all puzzles from a report via one-time purchase ($4.99).
+Unlocks all puzzles from a report via one-time purchase (₹442).
 - Creates unlock record in `puzzle_unlocks`
 - Updates all puzzles for the report to `is_locked = false`
 
@@ -152,7 +152,7 @@ Returns progress statistics (accuracy, completion rate, time spent, etc.).
 - [ ] Track puzzle progress via `recordPuzzleProgress()`
 
 ### ⏳ Step 6: One-Time Purchase Flow
-- [ ] Add "Unlock All Puzzles - $4.99" button on report page
+- [ ] Add "Unlock All Puzzles - ₹442" button on report page
 - [ ] Integrate with Stripe Checkout
 - [ ] Call `unlockPuzzlesOneTime()` after successful payment
 - [ ] Refresh puzzle list to show unlocked puzzles

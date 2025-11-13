@@ -20,10 +20,10 @@ const UpgradePrompt = ({ title = 'Unlock Personalized Puzzles', description = 'S
           onClick={() => navigate('/pricing', { state: { reportId: location.state?.analysis?.reportId } })}
           className="w-full px-4 py-3 rounded-lg font-semibold bg-gray-900 hover:bg-black text-white"
         >
-          Buy One-Time Pack ($4.99)
+          Buy One-Time Pack (₹442)
         </button>
       </div>
-      <p className="mt-3 text-xs text-gray-500">Monthly $6.99 • Quarterly $18.99 • Annual $59.99</p>
+      <p className="mt-3 text-xs text-gray-500">Monthly ₹619 • Quarterly ₹1682 • Annual ₹5314</p>
     </div>
   );
 };

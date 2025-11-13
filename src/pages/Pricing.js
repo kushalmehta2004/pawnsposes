@@ -8,7 +8,7 @@ const plans = [
   {
     id: 'free',
     name: 'Free',
-    price: '$0',
+    price: '₹0',
     period: '',
     features: [
       '1 full PDF report (first time only)',
@@ -20,7 +20,7 @@ const plans = [
   {
     id: 'monthly',
     name: 'Monthly',
-    price: '$6.99',
+    price: '₹619',
     period: '/mo',
     features: [
       'Weekly puzzles unlocked (4 sections)',
@@ -33,7 +33,7 @@ const plans = [
   {
     id: 'quarterly',
     name: 'Quarterly',
-    price: '$18.99',
+    price: '₹1682',
     period: '/3 mo',
     features: [
       '3 months of weekly puzzle access',
@@ -45,7 +45,7 @@ const plans = [
   {
     id: 'annual',
     name: 'Annual',
-    price: '$59.99',
+    price: '₹5314',
     period: '/yr',
     features: [
       'Full-year puzzle access (52 sets)',
@@ -58,7 +58,7 @@ const plans = [
   {
     id: 'one-time',
     name: 'One-Time Pack',
-    price: '$4.99',
+    price: '₹442',
     period: '',
     features: [
       "Unlock just this week's puzzles",
@@ -90,7 +90,7 @@ const Pricing = () => {
       }
       try {
         setIsProcessing(true);
-        const order = await createRazorpayOrder({ amount: 4.99, userId: user.id, reportId });
+        const order = await createRazorpayOrder({ amount: 442, userId: user.id, reportId });
         await openRazorpayCheckout({ order, user, reportId });
         // Webhook will finalize unlock
         navigate('/report-display', { state: { ...location.state } });
@@ -194,7 +194,7 @@ const Pricing = () => {
         </div>
 
         <div className="mt-12 text-center text-sm text-gray-500">
-          Prices in USD. Billing handled securely via Stripe (coming soon).
+          Prices in INR. Billing handled securely via Razorpay.
         </div>
       </div>
     </div>

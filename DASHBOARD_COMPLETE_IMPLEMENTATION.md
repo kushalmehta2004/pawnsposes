@@ -10,26 +10,26 @@
 - ✅ 1 Teaser puzzle per category (4 total)
 - ❌ No weekly puzzles
 
-### One-Time Pack - $4.99
+### One-Time Pack - ₹442
 - ✅ 1 week's puzzles unlocked from free report
 - ✅ All 4 categories unlocked for 1 week
 - ❌ No new reports
 
-### Monthly Plan - $6.99/month
+### Monthly Plan - ₹619/month
 - ✅ Weekly puzzles unlocked (4 sections)
 - ✅ Puzzles refresh every week from new games
 - ✅ Download updated PDF report each week
 
-### Quarterly Plan - $18.99 (3 months)
+### Quarterly Plan - ₹1682 (3 months)
 - ✅ 12 weeks of puzzle access
 - ✅ 12 updated puzzle sets + reports
-- ✅ Save $2.88 vs monthly
+- ✅ Save ₹175 vs monthly
 
-### Annual Plan - $59.99/year
+### Annual Plan - ₹5314/year
 - ✅ 52 weeks of puzzle access
 - ✅ Reports included automatically
 - ✅ Priority new features
-- ✅ Save $23.89 vs monthly
+- ✅ Save ₹2114 vs monthly
 
 ---
 
@@ -860,7 +860,7 @@ const Dashboard = () => {
                   🎁 Unlock All Puzzles
                 </h3>
                 <p className="text-primary-700 dark:text-primary-300 text-sm">
-                  Get weekly puzzles in all 4 categories starting at $6.99/month
+                  Get weekly puzzles in all 4 categories starting at ₹619/month
                 </p>
               </div>
               <button
