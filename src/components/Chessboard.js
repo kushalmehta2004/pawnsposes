@@ -6,6 +6,7 @@ import { Chess } from 'chess.js';
  * - FEN input, legal moves highlighting, basic move handling
  * - Orientation (white/black), last-move highlight, coordinates on all sides
  * - Smooth transitions for piece movement using an overlay with CSS transforms
+ * - Drag-to-move support (Chess.com/Lichess style)
  */
 const Chessboard = ({
   position,              // FEN string
@@ -15,6 +16,7 @@ const Chessboard = ({
   lastMove = null,
   showCoordinates = true,
   enableArrows = true,   // enable right-click drawing
+  enableDragToMove = true, // enable left-click drag-to-move
   preserveDrawingsOnPositionChange = false, // keep drawings when position updates
   onDrawChange,          // optional callback({ arrows, circles })
   moveResult = null,     // { square, isCorrect } - shows checkmark/X on destination square
@@ -61,6 +63,11 @@ const Chessboard = ({
   const [dragCurSq, setDragCurSq] = useState(null);
   const [dragColor, setDragColor] = useState('green');
   const boardGridRef = useRef(null);
+
+  // Drag-to-move state (separate from right-click drawing)
+  const [dragMoveSrcSquare, setDragMoveSrcSquare] = useState(null); // Square where drag started
+  const [dragMoveCurPos, setDragMoveCurPos] = useState(null); // { x, y } cursor position during drag
+  const [isDrawingArrow, setIsDrawingArrow] = useState(false); // true when right-click dragging arrows
 
   const chess = useMemo(() => {
     try {
@@ -120,8 +127,8 @@ const Chessboard = ({
   };
 
   const onSquareClick = (row, col) => {
-    // Prevent any moves if disabled
-    if (disabled) return;
+    // Prevent any moves if disabled or during drag
+    if (disabled || dragMoveSrcSquare) return;
 
     const square = squareFromRowCol(row, col);
 
@@ -370,7 +377,7 @@ const Chessboard = ({
   const ranksStyle = { display: 'flex', flexDirection: 'column', width: '20px' };
   const rankLabelStyle = { height: `${squareSize}px`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, color: '#444', fontSize: '0.8rem', fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial' };
 
-  const boardGridStyle = { display: 'grid', gridTemplateColumns: `repeat(8, ${squareSize}px)`, gridTemplateRows: `repeat(8, ${squareSize}px)`, gap: '0', position: 'relative', borderRadius: '6px', overflow: 'hidden' };
+  const boardGridStyle = { display: 'grid', gridTemplateColumns: `repeat(8, ${squareSize}px)`, gridTemplateRows: `repeat(8, ${squareSize}px)`, gap: '0', position: 'relative', borderRadius: '6px', overflow: 'hidden', userSelect: 'none' };
 
   // Helpers for drawing color from modifiers (Lichess-like)
   const colorFromEvent = (e) => {
@@ -413,42 +420,121 @@ const Chessboard = ({
     if (onDrawChange) onDrawChange({ arrows: drawnArrows, circles: next });
   };
 
+  // Handle drag-to-move end: validate move and execute if legal
+  const handleDragEnd = (fromSquare, toSquare) => {
+    if (!fromSquare || !toSquare) return;
+    if (fromSquare === toSquare) return; // No-op if released on same square
+    
+    // Validate the move
+    const legalMoves = chess.moves({ square: fromSquare, verbose: true });
+    const isLegal = legalMoves.some(m => m.to === toSquare);
+    
+    if (!isLegal) {
+      // Illegal move - snap back
+      return;
+    }
+    
+    // Execute the move
+    try {
+      const move = chess.move({ from: fromSquare, to: toSquare, promotion: 'q' });
+      if (move) {
+        const newFen = chess.fen();
+        setLocalFen(newFen);
+        setSelectedSquare(null);
+        setLegalTargets([]);
+        if (onMove) onMove({ from: move.from, to: move.to, san: move.san, fen: newFen });
+      }
+    } catch (e) {
+      // Invalid move - just return, piece will snap back
+    }
+  };
+
   // Pointer handlers for right-click drawing
   const onPointerDownBoard = (e) => {
-    if (!enableArrows || disabled) return;
-    if (e.button !== 2) return; // right button only
-    e.preventDefault();
-    const sq = pointToSquare(e.clientX, e.clientY);
-    if (!sq) return;
-    setDragColor(colorFromEvent(e));
-    setDragStartSq(sq);
-    setDragCurSq(sq);
-  };
-  const onPointerMoveBoard = (e) => {
-    if (!enableArrows) return;
-    if (dragStartSq == null) return;
-    const sq = pointToSquare(e.clientX, e.clientY);
-    setDragColor(colorFromEvent(e));
-    setDragCurSq(sq);
-  };
-  const onPointerUpBoard = (e) => {
-    if (!enableArrows) return;
-    if (dragStartSq == null) return;
-    const endSq = pointToSquare(e.clientX, e.clientY);
-    const color = dragColor; // finalize with the preview color
-    if (endSq && dragStartSq) {
-      if (endSq === dragStartSq) {
-        toggleCircle(endSq, color);
-      } else {
-        toggleArrow(dragStartSq, endSq, color);
-      }
+    // Right-click (drawing)
+    if (e.button === 2) {
+      if (!enableArrows || disabled) return;
+      e.preventDefault();
+      const sq = pointToSquare(e.clientX, e.clientY);
+      if (!sq) return;
+      setIsDrawingArrow(true);
+      setDragColor(colorFromEvent(e));
+      setDragStartSq(sq);
+      setDragCurSq(sq);
     }
-    setDragStartSq(null);
-    setDragCurSq(null);
+    // Left-click (piece drag-to-move)
+    else if (e.button === 0) {
+      if (disabled || !enableDragToMove) return;
+      const sq = pointToSquare(e.clientX, e.clientY);
+      if (!sq) return;
+      
+      // Check if there's a piece of the correct color on this square
+      const piece = chess.get(sq);
+      if (!piece || piece.color !== chess.turn()) return;
+      
+      // Only start drag if this would be a legal source square
+      const legalMoves = chess.moves({ square: sq, verbose: true });
+      if (legalMoves.length === 0) return;
+      
+      // Clear any click-to-move state
+      setSelectedSquare(null);
+      setLegalTargets([]);
+      setDrawnArrows([]);
+      setDrawnCircles([]);
+      if (onDrawChange) onDrawChange({ arrows: [], circles: [] });
+      
+      setDragMoveSrcSquare(sq);
+      setDragMoveCurPos({ x: e.clientX, y: e.clientY });
+    }
   };
+
+  const onPointerMoveBoard = (e) => {
+    // Arrow drawing movement
+    if (isDrawingArrow && dragStartSq != null) {
+      if (!enableArrows) return;
+      const sq = pointToSquare(e.clientX, e.clientY);
+      setDragColor(colorFromEvent(e));
+      setDragCurSq(sq);
+    }
+    // Piece drag-to-move movement
+    else if (dragMoveSrcSquare != null) {
+      setDragMoveCurPos({ x: e.clientX, y: e.clientY });
+    }
+  };
+
+  const onPointerUpBoard = (e) => {
+    // Arrow drawing end
+    if (isDrawingArrow && dragStartSq != null) {
+      if (!enableArrows) {
+        setIsDrawingArrow(false);
+        setDragStartSq(null);
+        setDragCurSq(null);
+        return;
+      }
+      const endSq = pointToSquare(e.clientX, e.clientY);
+      const color = dragColor;
+      if (endSq && dragStartSq) {
+        if (endSq === dragStartSq) {
+          toggleCircle(endSq, color);
+        } else {
+          toggleArrow(dragStartSq, endSq, color);
+        }
+      }
+      setIsDrawingArrow(false);
+      setDragStartSq(null);
+      setDragCurSq(null);
+    }
+    // Piece drag-to-move end
+    else if (dragMoveSrcSquare != null) {
+      const targetSq = pointToSquare(e.clientX, e.clientY);
+      handleDragEnd(dragMoveSrcSquare, targetSq);
+      setDragMoveSrcSquare(null);
+      setDragMoveCurPos(null);
+    }
+  };
+
   const onContextMenuBoard = (e) => {
     if (!enableArrows) return;
-    // prevent default browser context menu
     e.preventDefault();
   };
 
@@ -545,15 +631,50 @@ const Chessboard = ({
                 // Smooth animation: longer duration + enhanced easing for stepback, normal for regular moves
                 transition: suppressTransitions ? 'none' : `transform ${transitionDuration} ${transitionTiming}`,
                 willChange: 'transform', // GPU acceleration hint
+                // Hide piece if it's being dragged
+                opacity: dragMoveSrcSquare === p.square ? 0 : 1,
+                pointerEvents: dragMoveSrcSquare === p.square ? 'none' : 'auto',
               };
               return (
                 <img key={p.id} src={pieceSrcFor(code)} alt={code} style={pieceStyle} />
               );
             })}
+
+            {/* Dragging piece overlay - follows cursor pixel-perfectly */}
+            {dragMoveSrcSquare && dragMoveCurPos && (
+              (() => {
+                const el = boardGridRef.current;
+                if (!el) return null;
+                const rect = el.getBoundingClientRect();
+                const relX = dragMoveCurPos.x - rect.left;
+                const relY = dragMoveCurPos.y - rect.top;
+                
+                const piece = chess.get(dragMoveSrcSquare);
+                if (!piece) return null;
+                
+                const code = piece.color === 'w' ? piece.type.toUpperCase() : piece.type.toLowerCase();
+                // Center the dragging piece on the cursor - NO TRANSITION
+                const dragPieceStyle = {
+                  ...pieceImgBaseStyle,
+                  position: 'absolute',
+                  transform: `translate(${relX - pieceSize / 2}px, ${relY - pieceSize / 2}px)`,
+                  opacity: 0.9,
+                  zIndex: 1000,
+                  pointerEvents: 'none',
+                  cursor: 'grabbing',
+                  transition: 'none',
+                  willChange: 'transform',
+                };
+                
+                return (
+                  <img key="drag-piece" src={pieceSrcFor(code)} alt="dragging" style={dragPieceStyle} />
+                );
+              })()
+            )}
           </div>
 
           {/* Legal move markers overlay (on top of pieces) */}
-          {selectedSquare && legalTargets.length > 0 && (
+          {selectedSquare && legalTargets.length > 0 && !dragMoveSrcSquare && (
             <svg width={squareSize * 8} height={squareSize * 8} style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}>
               {legalTargets.map((sq, idx) => {
                 const { x, y } = squareToXY(sq);
@@ -562,6 +683,22 @@ const Chessboard = ({
                 const r = Math.max(6, pieceSize * 0.18);
                 return <circle key={idx} cx={cx} cy={cy} r={r} fill="rgba(0,0,0,0.35)" />;
               })}
+            </svg>
+          )}
+
+          {/* Drag-to-move legal targets overlay */}
+          {dragMoveSrcSquare && (
+            <svg width={squareSize * 8} height={squareSize * 8} style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}>
+              {(() => {
+                const legalMoves = chess.moves({ square: dragMoveSrcSquare, verbose: true }).map(m => m.to);
+                return legalMoves.map((sq, idx) => {
+                  const { x, y } = squareToXY(sq);
+                  const cx = x + pieceSize / 2;
+                  const cy = y + pieceSize / 2;
+                  const r = Math.max(6, pieceSize * 0.18);
+                  return <circle key={idx} cx={cx} cy={cy} r={r} fill="rgba(0,0,0,0.35)" />;
+                });
+              })()}
             </svg>
           )}
 
