@@ -27,14 +27,6 @@ const About = () => {
       experience: "5+ years",
       achievements: ["State Champion", "FIDE Certified"],
       bio: "Expert in tournament preparation and strategy development, with a track record of preparing students for competitive play."
-    },
-    {
-      name: "Shubraj Salgotra",
-      title: "Coach",
-      image: "/images/master 3.jpg",
-      experience: "5+ years",
-      achievements: ["State Champion", "FIDE Master"],
-      bio: "Passionate and experienced, Shubraj Salgotra has spent over five years nurturing aspiring chess players and shaping champions."
     }
   ];
 
