@@ -183,7 +183,7 @@ const callPawnsposesAI = async (gamesData, formData) => {
     throw new Error('Gemini API key not configured');
   }
 
-  const model = 'gemini-2.0-flash-exp';
+  const model = 'gemini-1.5-flash';
   const prompt = createPawnsposesAIPrompt(gamesData, formData);
   
   try {
