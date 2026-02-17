@@ -1226,7 +1226,7 @@ EXPLANATION STYLE: Use precise chess terminology. Include deep strategic and tac
     console.log('Sending request to Gemini 2.0 Flash API...');
     
     // Use only Gemini 2.0 Flash (free version)
-    const model = 'gemini-2.0-flash-exp';
+    const model = 'models/gemini-1.5-flash';
     
     console.log(`Using model: ${model}`);
     
@@ -1446,7 +1446,7 @@ Use the context-aware position analysis above to provide deeper, more targeted i
         throw new Error('Gemini API key not configured. Please add your API key to the .env file.');
       }
       
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2970,7 +2970,7 @@ const callUnifiedGeminiAPI = async (gamesData, formData) => {
 
   console.log('🎯 Sending single comprehensive request to Gemini...');
   
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`, {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -5200,7 +5200,7 @@ const callGeminiForRecurringWeaknesses = async (prompt, preparedFenData) => {
     throw new Error('Gemini API key not configured');
   }
 
-  const model = 'gemini-2.0-flash-exp';
+  const model = 'models/gemini-1.5-flash';
   
   try {
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
@@ -5458,7 +5458,7 @@ const callPawnsposesAI = async (gamesData, formData) => {
     throw new Error('Gemini API key not configured');
   }
 
-  const model = 'gemini-2.0-flash-exp';
+  const model = 'models/gemini-1.5-flash';
   const prompt = createPawnsposesAIPrompt(gamesData, formData);
   
   try {
